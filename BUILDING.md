@@ -1,12 +1,13 @@
 # Building ORBIT
 
-The current tree is **ORBIT 0.6.0**, adding the official CLUSTER oscillator and synthesized sample replacements to the SLOOP v2.5 integration. Device builds require the pi32v2 toolchain and AC79 SDK. The [validation record](docs/VALIDATION.md) distinguishes the post-version-bump build from hardware installation results. Generated packages are not committed to the repository.
+The current release target is **ORBIT 0.7.0**, with CLOUD, user macros and the functional SLOOP v2.6 port. Device builds require the pi32v2 toolchain and AC79 SDK. The [validation record](docs/VALIDATION.md) owns final package measurements and distinguishes software checks from hardware evidence. Generated packages are not committed to the repository.
 
-The build makes three files in `build/`:
+The build produces these artifacts in `build/`:
 
 | File | What |
 | --- | --- |
-| `felucca.bin` | the firmware app |
+| `felucca.elf` | the linked firmware app |
+| `felucca.dis` | the disassembly used for target-cost checks |
 | `loader/ota.bin` | the update loader |
 | `orbit.fwsc` | the installable package (app + loader) |
 
@@ -49,10 +50,13 @@ sh build.sh
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
-`sh build.sh --release 0.9-beta` makes a release build: the package identity becomes
-`FM-1_909` and the version string `0.9-BETA`; the package remains `build/orbit.fwsc`.
-
-Build the 0.6.0 package with `PYTHON=~/.jieli/orbit-venv/bin/python sh build.sh`. The default source version is `ORBIT 0.6.0`, and the install identity remains `FM-1_900`. Check the displayed version with the device's INFO reply. `--release` only accepts upstream's single-digit `X.Y` form, so do not pass `--release 0.6.0`. The verified package is in the [0.6.0 release](https://github.com/dspaudio/orbit/releases/tag/v0.6.0). The previous [0.5.0 release](https://github.com/dspaudio/orbit/releases/tag/v0.5.0) and [0.4.1 release](https://github.com/dspaudio/orbit/releases/tag/v0.4.1) remain available.
+Build the 0.7.0 package with `PYTHON=~/.jieli/orbit-venv/bin/python sh build.sh`.
+The default source version is `ORBIT 0.7.0`, and the install identity remains
+`FM-1_900`. **Do not use `--release` for this release:** it changes both the
+product identity and displayed version using upstream's single-digit `X.Y`
+scheme. A three-part ORBIT version is not that scheme. Confirm the actual
+package and source version before labelling a generated site; the site
+generator's `--version` supplies metadata, not a firmware version rewrite.
 
 Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`):
 
@@ -62,7 +66,7 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`):
 | `FELUCCA_OTA` | 1 | update entry (needs `FELUCCA_FLASH`) |
 | `FELUCCA_OTA_DRYRUN` | 0 | For checking the OTA flow; never used in a real install package |
 | `FELUCCA_CDC` | 1 | USB serial console |
-| `FELUCCA_UAC` | 1 | USB audio input: the master output, 44.1 kHz stereo (after Felucca 1.0) |
+| `FELUCCA_UAC` | 1 | USB audio input: the master output, 44.1 or 48 kHz stereo |
 | `FELUCCA_UART` | 1 | TRS MIDI IN (the 3.5 mm jack) |
 | `FELUCCA_ICONS` | 1 if the icon atlas exists | Built-in icons |
 | `FELUCCA_SLICE` | 0 | Optional SLICE engine |
@@ -95,7 +99,24 @@ the hashes; `BUDGET_UPDATE=1` does the same for the cost files.
 
 ## Install
 
-On Windows, use WSL for the command-line build. Installer automation from upstream is not included in ORBIT.
+**BACKUP before updates or downgrades.** Stop playback and export Projects /
+Backup from the editor. ORBIT 0.7.0 writes ORP7 projects and OPB2 preset banks;
+legacy ORBIT files can be imported, but raw SLOOP FUN6 is rejected. Older
+firmware cannot read new saves and may overwrite them through autosave.
+Keep a pre-update backup for returning to the matching old firmware. See
+[the user guide](GUIDE.md#backup-updates-and-downgrades).
+
+The browser installer address is
+[https://dspaudio.github.io/orbit/](https://dspaudio.github.io/orbit/).
+The page downloads the latest published stable package, verifies
+its size, SHA-256, identity, loader marker and CRCs, then enables Connect.
+Connect requests Web MIDI SysEx permission; Install is separately enabled after
+device identity preflight. A failed download offers Retry download, not a file
+picker. Check the displayed version; an older published release is not 0.7.0.
+
+Use Chrome or Edge, a USB data cable and a direct connection. Keep power and USB
+connected until the write and reboot finish. On Windows, use WSL for the
+command-line build; the upstream INSTALL-SLOOP.bat is not an ORBIT install path.
 
 From the command line (needs `pip3 install mido python-rtmidi`):
 
@@ -104,7 +125,46 @@ python3 tools/fm1_install.py build/orbit.fwsc
 python3 tools/fm1_install.py --info          # identity of the connected FM-1
 ```
 
-This repository doesn't include the web installer site generator `web/make_site.py` or `webapp/installer/`. Use the CLI above to install an `orbit.fwsc` you built yourself. `web/editor.html` edits sounds, the sequencer and samples; it isn't a standalone firmware installer page.
+The CLI is the fallback for a checked local `build/orbit.fwsc`. `--info` only
+reads identity; the package argument starts the install workflow. The installer
+checks the FM-1 identity and package before writing. Neither the CLI nor a
+successful simulated installer test proves physical recovery after a power cut.
+The 0.7.0 installation, reboot, actual version and PING were verified on an FM-1.
+Historical 0.6.0 audio checks are not 0.7.0 audio checks.
+
+## Build and serve the installer site locally
+
+After building and checking the actual 0.7.0 package:
+
+```sh
+python3 tools/make_site.py --package build/orbit.fwsc --version 0.7.0 --out build/site \
+  --release-url https://github.com/dspaudio/orbit/releases/tag/v0.7.0
+python3 -m http.server 8766 --bind 127.0.0.1 --directory build/site
+```
+
+Open http://127.0.0.1:8766/ for the installer and
+http://127.0.0.1:8766/editor.html for the editor. Localhost is suitable for Web
+MIDI; do not open the installer source as a file and expect a release manifest.
+Generation copies `web/installer.html` as `index.html`, the installer modules,
+editor/font and native screenshot assets. It writes a versioned package,
+`manifest.json` and `SHA256SUMS` from that input. Missing or malformed packages
+are refused. The output directory must be absent or already a generated site;
+regeneration replaces a previously generated site.
+
+Focused site checks:
+
+```sh
+node web/test_package.mjs
+node web/test_installer.mjs
+python3 tests/site_test.py
+```
+
+`.github/workflows/pages.yml` runs after a published release or manual dispatch.
+It selects the latest published release, downloads `orbit.fwsc` and `SHA256SUMS`,
+checks the checksum, generates/tests the site, then uploads a Pages artifact.
+Repository Pages must use **GitHub Actions** as its source. This describes the
+publication workflow, not a claim that it has run. Do not label a 0.6.0 package
+as 0.7.0 by changing only manifest metadata.
 
 Installing firmware is at your own risk. If an install fails and the FM-1 no longer
 starts, recovery needs [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter).

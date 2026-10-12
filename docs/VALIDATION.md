@@ -1,5 +1,96 @@
 # ORBIT validation record
 
+## ORBIT 0.7.0 package and device installation, 2026-10-12
+
+The 0.7.0 package was built locally and installed on an FM-1 at the user's
+request. Installation and device responses are verified below; publication
+and Pages deployment are separate release steps.
+
+The actual pi32v2 build passes with identity `FM-1_900`:
+
+| Region | Used | Limit | Remaining |
+| --- | ---: | ---: | ---: |
+| App image | 579760 B | 581564 B | 1804 B |
+| RAM `.data + .bss` | 97064 B | 98304 B | 1240 B |
+| Pool | 333948 B | 344064 B | 10116 B |
+
+The pool retains the required 8192-byte reserve. All 35 static target-cost checks
+pass with existing budgets and +10% tolerance unchanged; only the new CLOUD
+baselines were added (render 451, block 9). These are instruction-cost estimates,
+not hardware cycle or ISR-deadline measurements.
+
+`build/orbit.fwsc` is 610019 bytes, SHA-256
+`af8ecb95e2a15e11a2ac102664c1d47df2454ebcd5b163110f27cd775a591ddf`.
+The actual ELF places four 3840-byte project slots at `0x01c7c0c8`,
+with `_bss_end=0x01c1fb28` and `_pool_end=0x01c7187c`.
+
+Host evidence:
+
+- `python tools/orbit_check.py`: 29/30 cases pass on macOS. The unchanged
+  Linux-only IRQ initializer test passes separately on Linux x86-64; macOS
+  cannot compile its ELF section attribute or `MAP_FIXED_NOREPLACE`.
+- The full `sh tests/run_tests.sh` run exposes an existing Apple ASan startup
+  error at `sanitizer_malloc_mac.inc:189`. An empty `main` reproduces it.
+  The unchanged ASan/UBSan stress and arena tests pass on Linux arm64.
+- Strict audio regression passes: 218 matching hashes, zero health failures,
+  voice/routing failures, CPU overruns or crashes. The deliberate look-ahead
+  limiter changes the previous 210 hashes; exactly eight CLOUD rows were added.
+  Existing host CPU budgets and tolerances remain; only eight measured CLOUD
+  entries were added.
+- Project, user-preset, MIDI-learn, UI, INSERT, modulation, punch, slicer,
+  sequencer and CLOUD boundary checks pass with divide-by-zero sanitizers.
+  CLUSTER arithmetic also passes full undefined-behavior checks against
+  independent wide oracles: 1720896 products and 1720896 phase/control pairs.
+- Web regression covers protocol 12, legacy 0.6.0, signed16 CLUSTER values,
+  macro persistence, source namespaces and rejection before any MIDI request
+  when a custom mapping cannot be sent to pre-v12 firmware.
+- Final audit found that the numeric ENV/LFO multiplier also accelerated
+  named ENV SYNC divisions. A real-panel regression reproduced nine failures;
+  exempting named descriptors fixes slow and fast detents in both directions
+  for ATK/DEC/REL while retaining accelerated unsynced controls. The required
+  host checker again passes 29/30, with only the same macOS IRQ compile limit.
+
+Fresh native C captures confirm MACROS assignments, PERFORM values and the
+unchanged HOME Event Tape / Visualizer cycle. The 624-condition CLUSTER
+diagnostic reports zero POLY voice-retention failures and zero full-mix endpoint
+PCM clipping in its 576 full-mix conditions. MONO/LEGATO cases intentionally
+have one voice. In sixteen four-note default-FX conditions, samples above the
+output soft knee drop from 16808 to 7033 with the new limiter.
+
+The bounded multiply / signed-shift optimization retains the original PCM and
+state behavior. Alternative phase-width and forced-inline candidates passed
+host math/audio checks but exceeded the unchanged pi32v2 cost budget; neither
+is shipped. The accepted arithmetic was retained in the final rebuild with
+the ENV SYNC input correction; image, RAM, pool and static costs are unchanged.
+
+The reported physical CLUSTER one-voice/crackle symptom was not reproduced.
+Every factory CLUSTER preset is already POLY; MONO/LEGATO and CPU shedding are
+distinct possible one-voice paths. Host checks do not prove hardware timing or
+crackle resolution. MiniLab 3 relative encoders and physical controller
+operation were not tested; the learned map is device-wide and absolute,
+not an unlimited or per-project controller profile.
+
+### Actual 0.7.0 device installation
+
+The verified package above was installed over USB MIDI on `FM-1_900`
+(Felucca), previously running ORBIT 0.6.0. Transfer reached 100%, automatic
+reboot completed and the installer exited 0. A separate device probe required
+the exact version `FELUCCA ORBIT 0.7.0` and returned protocol 12, 17 engines,
+45 globals and a successful PING.
+
+All 14 pre-install and 15 post-install backup objects passed independent
+decoded-length and CRC-32 checks. Thirteen previous objects are byte-identical;
+none were removed. The new 40-byte MIDI settings object is ID 10. Working
+project object 0 remains 3840 bytes and converts from FUN5 to ORP7. Decoded
+comparison preserves four tracks' legacy sound values, engine/preset IDs,
+steps, microtiming, fill and lock semantics, selection and applicable globals.
+The repurposed G_INFO/G_DRCH storage cells encode default OFF TEXTURE metadata;
+raw project byte equality is not claimed.
+
+Personal backups remain private and are not release assets. This installation
+does not establish audio quality, CLUSTER crackle resolution, target deadlines,
+power-loss recovery or physical controller behavior.
+
 ## ORBIT 0.6.0 release preparation, 2026-10-10
 
 README, release notes, public technical documentation and new comments are in English.
@@ -158,7 +249,7 @@ The user asked for installation on the device and a version bump. The source ver
 | Actual install | `~/.jieli/orbit-venv/bin/python tools/fm1_install.py build/orbit.fwsc --port Felucca --yes` exit 0. Loader handoff, write **100%**, automatic reboot and `FM-1_900` reconnection confirmed |
 | Device after install | INFO **`FELUCCA ORBIT 0.5.0`**, protocol **10**, engines **15**, globals **33**, PING **PASS** |
 | Data preservation | Post-install backup compared with the pre-install one: all **13/13 original objects byte-identical**, 0 changes. The new SYN bank object 9 is 1,464 B / CRC `41fef647` and reads back with a valid CRC |
-| User confirmation | Right after installation the user confirmed normal operation (in Korean, **"잘 되네"**, "works fine") |
+| User confirmation | Right after installation the user confirmed normal operation; the English translation of the confirmation is "works fine". |
 
 Installed package SHA-256: `803b61c9b8288f9b59a498deb66ae21f3ffb982226d2e2fcb9b7197da2c3174d`. Before installing, `load_package()` checked the header, file list and each file's CRC. Logs and backups were kept locally under `.omo/evidence/orbit-0.5.0-install-20261010/` (`preinstall-backup.json` and `postinstall-backup.json` use the web editor backup format). That private backup, evidence and journal material isn't part of the repository or the release. The MIDI link and the QA browser and server owned by this work were shut down.
 
