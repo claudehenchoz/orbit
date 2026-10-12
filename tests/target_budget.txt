@@ -4,8 +4,8 @@
 # SLOOP 2.0 (reviewed): analog +9 % (drive crossfade, phase reset), lofi +4 % (input clamp), slicer on
 # the sample-accurate clock (its divides are per step / per block, not per sample: the per-sample
 # loop has none), the mix out of the ISR into its own function (fm1_alnk0_irq calls it).
-# ORBIT/FM6 첫 타깃 측정: 2026-10-09, jieli-linux-toolchains-20250324.1.
-# 새 엔진의 기준만 추가하며 기존 ISR 기준과 허용치는 유지한다. 정적 비용은 실기기 사이클 측정이 아니다.
+# First ORBIT/FM6 target measurement: 2026-10-09, jieli-linux-toolchains-20250324.1.
+# Only new engine baselines are added; existing ISR budgets/tolerance remain. Static costs are not hardware cycle measurements.
 analog_render 638
 digital_render 333
 phase_render 79
@@ -42,4 +42,8 @@ uac_tap48 536
 # This does not establish actual ISR timing or full cycle budgets of internal calls.
 cls_render 570
 cluster_render 53
+# First CLOUD pi32v2 measurements: 2026-10-12, ORBIT 0.7.0.
+# Existing budgets/+10% tolerance preserved; no claim of physical ISR deadlines.
+cloud_render 451
+cloud_block 9
 

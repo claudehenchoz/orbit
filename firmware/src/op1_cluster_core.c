@@ -13,8 +13,7 @@ static int64_t cls_s32(uint32_t x) {
     return x < UINT32_C(0x80000000) ? (int64_t)x : (int64_t)x - INT64_C(4294967296);
 }
 static int64_t cls_asr(int64_t x, unsigned n) {
-    int64_t d = INT64_C(1) << n;
-    return x >= 0 ? x / d : -1 - (-(x + 1) / d);
+    return x >= 0 ? (int64_t)((uint64_t)x >> n) : -1 - (int64_t)((uint64_t)(-(x + 1)) >> n);
 }
 static int16_t cls_sat16(int64_t x) {
     return (int16_t)(x > 32767 ? 32767 : x < -32768 ? -32768 : x);
@@ -25,12 +24,12 @@ static uint32_t cls_sat32(int64_t x) {
 static int16_t cls_ns16(int32_t x) { return (int16_t)cls_s16((uint32_t)x); }
 /* Default fractional multiply with unbiased ties-to-even and halfword saturation. */
 static int16_t cls_mul(int16_t a, int16_t b) {
-    int64_t p = (int64_t)a * b * 2;
-    if (p == INT64_C(2147483648)) p = INT32_MAX;
-    int64_t h = cls_asr(p, 16);
+    int32_t p = (int32_t)a * b;
+    p = p == INT32_C(1073741824) ? INT32_MAX : p * 2;
+    int32_t h = p >= 0 ? (int32_t)((uint32_t)p >> 16) : -1 - (int32_t)((uint32_t)(-(p + 1)) >> 16);
     uint32_t l = (uint32_t)p & 65535u;
-    if (l > 32768u || (l == 32768u && h % 2 != 0)) ++h;
-    return cls_sat16(h);
+    if (l > 32768u || (l == 32768u && ((uint32_t)h & 1u))) ++h;
+    return (int16_t)(h > 32767 ? 32767 : h < -32768 ? -32768 : h);
 }
 static uint32_t cls_get32(const cls_voice *v, unsigned o) {
     const uint8_t *p = v->bytes + o;

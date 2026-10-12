@@ -112,8 +112,8 @@ int main(void)
     host_preset(&trk[1], ENGI_CLUSTER, 0);
     song.sel = 0;
     request(ED_INFO, 0, 0, 0);
-    check(nw == 1u && wire[0][wire_n[0] - 2u] == 11u && ED_WIDE == 77u,
-          "INFO protocol11 and envelope77");
+    check(nw == 1u && wire[0][wire_n[0] - 2u] == 12u && ED_WIDE == 77u,
+          "INFO protocol12 and envelope77");
 
     for (w = 0; w < 2u; w++) {
         width = w ? 3u : 2u;
@@ -319,6 +319,74 @@ int main(void)
         /* Ensure the next plain WATCH also sees a value change. */
         TSEL->p[P_E0 + 1] = 0;
         trk[1].p[P_PAN] = 0;
+    }
+    {   /* protocol 12: HOME macro assignments (78..81) and their user preset lifecycle */
+        up_rec_t before;
+        song.sel = 0;
+        sync_reload = 0;
+        request(ED_MACRO, 0, (uint8_t[]){0, 0, P_ITYPE, P_E0 + 1, MACRO_DEFAULT}, 5);
+        check(frame(ED_MACRO, 0, 6) && wire[0][5] == 0 && wire[0][6] == 0 && wire[0][7] == 0 && wire[0][8] == P_ITYPE &&
+                  wire[0][9] == P_E0 + 1 && wire[0][10] == MACRO_DEFAULT && trk[0].macro[1] == P_ITYPE && sync_reload,
+              "MACRO write: track 1 assignments, echoed, watchers told to reload");
+        request(ED_MACRO, 0, (uint8_t[]){0}, 1);
+        check(frame(ED_MACRO, 0, 6) && wire[0][6] == 0 && wire[0][9] == P_E0 + 1, "MACRO read");
+        request(ED_MACRO, 0, (uint8_t[]){0, 1, P_COUNT, 2, 3}, 5);
+        check(frame(ED_MACRO, 0, 6) && wire[0][6] == 1 && wire[0][7] == MACRO_DEFAULT && trk[0].macro[0] == 0 &&
+                  trk[0].macro[1] == P_ITYPE, "MACRO with id 71: rc 1, nothing changed (atomic)");
+        request(ED_MACRO, 0, (uint8_t[]){TRK_DRUM}, 1);
+        check(frame(ED_MACRO, 0, 6) && wire[0][6] == 1, "MACRO on the drum track: rc 1");
+        request(ED_MACRO, 0, (uint8_t[]){0, 1, 2}, 3);
+        check(frame(ED_MACRO, 0, 6) && wire[0][6] == 1 && trk[0].macro[0] == 0, "MACRO of a wrong length: rc 1, unchanged");
+        TSEL->p[P_DIST] = 99;
+        TSEL->lk_n = 1, TSEL->lk_param[0] = P_DIST, TSEL->lk_base[0] = 12, TSEL->lk_set[0] = 99;
+        check(up_store(7, "MAPS") == 3 && up_used(7) && up_rec(7)->ver == UP_VER && up_rec(7)->np == P_COUNT &&
+                  up_rec(7)->macro[1] == P_ITYPE && up_rec(7)->macro[3] == MACRO_DEFAULT && up_rec(7)->p[P_DIST] == 12,
+              "UP_STORE: the four assignments and the value under an active lock");
+        TSEL->lk_n = 0;
+        memset(trk[1].macro, 9, sizeof trk[1].macro);
+        check(up_load_to(&trk[1], 7) == 0 && trk[1].macro[0] == 0 && trk[1].macro[1] == P_ITYPE &&
+                  trk[1].macro[2] == P_E0 + 1 && trk[1].macro[3] == MACRO_DEFAULT && trk[1].user == 8u,
+              "UP_LOAD: the record's assignments with its sound, the user tag");
+        request(ED_UP_GET_MAP, 1, (uint8_t[]){7}, 1);
+        n = 6u + 1u + 8u + P_COUNT * 3u + 32u + 4u;                  /* (slot, used, engine, "MAPS\0") */
+        check(frame(ED_UP_GET_MAP, 1, 8u + P_COUNT * 3u + 32u + 4u) && wire[0][n - 5u] == 0 && wire[0][n - 4u] == P_ITYPE &&
+                  wire[0][n - 3u] == P_E0 + 1 && wire[0][n - 2u] == MACRO_DEFAULT, "UP_GET_MAP: UP_GET's layout then the map");
+        request(ED_UP_GET_MAP, 1, (uint8_t[]){30}, 1);
+        n = 6u + 1u + 4u + P_COUNT * 3u + 32u + 4u;                  /* (slot, used, engine, "\0") */
+        check(frame(ED_UP_GET_MAP, 1, 4u + P_COUNT * 3u + 32u + 4u) && wire[0][n - 2u] == MACRO_DEFAULT &&
+                  wire[0][n - 5u] == MACRO_DEFAULT, "UP_GET_MAP of an empty slot: four DEFAULT");
+        n = preset_args(a, 1);
+        a[n] = P_LPOL, a[n + 1u] = 0, a[n + 2u] = MACRO_DEFAULT, a[n + 3u] = P_E7;
+        request(ED_UP_PUT_MAP, 1, a, n + 4u);
+        check(frame(ED_UP_PUT_MAP, 1, 2) && wire[0][7] == 2 && up_rec(5)->macro[0] == P_LPOL && up_rec(5)->macro[1] == 0 &&
+                  up_rec(5)->macro[3] == P_E7 && n + 4u + 7u <= 271u, "UP_PUT_MAP (wide, at most 271 bytes): the map stored (rc 2: no flash on the host, RAM kept)");
+        before = *up_rec(5);
+        a[n + 1u] = 80;
+        request(ED_UP_PUT_MAP, 1, a, n + 4u);
+        check(wire[0][7] == 1 && !memcmp(&before, up_rec(5), sizeof before), "UP_PUT_MAP with id 80: rc 1 before the record changes");
+        request(ED_UP_PUT_MAP, 1, a, n + 3u);
+        check(wire[0][7] == 1 && !memcmp(&before, up_rec(5), sizeof before), "UP_PUT_MAP one map byte short: rc 1, unchanged");
+        request(ED_UP_PUT, 1, a, n);
+        check(wire[0][7] == 2 && up_rec(5)->macro[0] == MACRO_DEFAULT && up_rec(5)->macro[3] == MACRO_DEFAULT,
+              "old UP_PUT (no map sent): DEFAULT assignments");
+        host_preset_req(&trk[0], ENGI_CLUSTER, 0);
+        trk[0].eng_req = ENGI_CLUSTER;
+        request(ED_MACRO_DESC, 1, (uint8_t[]){0, P_E0 + 1}, 2);
+        check(nw == 1u && wire[0][6] == 0 && wire[0][7] == P_E0 + 1 && wire[0][8] == 0 && wire[0][9] == 1 &&
+                  dec(wire[0] + 11, 1) == -32768 && dec(wire[0] + 14, 1) == 32767 && !strcmp((char *)wire[0] + 20, "WAVE"),
+              "MACRO_DESC (wide): CLUSTER WAVE eligible, signed16 range, its label");
+        request(ED_MACRO_DESC, 0, (uint8_t[]){0, P_E0 + 4}, 2);
+        check(nw == 1u && wire[0][7] == 0 && wire[0][8] == 0, "MACRO_DESC: a reserved control (--) is not eligible");
+        request(ED_MACRO_DESC, 0, (uint8_t[]){0, P_FTYPE}, 2);
+        check(nw == 1u && wire[0][8] == 0, "MACRO_DESC: filter TYPE only on ANALOG");
+        host_preset_req(&trk[2], 0, 0);
+        trk[2].eng_req = 0;
+        request(ED_MACRO_DESC, 0, (uint8_t[]){2, P_FTYPE}, 2);
+        check(nw == 1u && wire[0][8] == 1, "MACRO_DESC: filter TYPE on ANALOG: eligible");
+        request(ED_MACRO_DESC, 0, (uint8_t[]){0, P_COUNT}, 2);
+        check(frame(ED_MACRO_DESC, 0, 4) && wire[0][7] == 1 && wire[0][8] == 0, "MACRO_DESC id 71: [track, id, 1, 0] only");
+        request(ED_INFO, 0, 0, 0);
+        check(nw == 1u && wire[0][wire_n[0] - 2u] == 12u, "INFO protocol 12");
     }
     printf("editor-wide: %d failures\n", fails);
     return fails ? 1 : 0;

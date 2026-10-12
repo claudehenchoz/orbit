@@ -7,6 +7,7 @@ protocol v3; commands 31-32 (any track's parameters) form protocol v4; command 3
 (SLOOP 2.3); commands 37-40 (the steps' nudges and parameter locks) form protocol v7, commands 41-42 (the
 steps' fill conditions) protocol v8, commands 68-71 (the FM6 engine's patches) protocol v9, and commands
 72-76 (SYN drum kits) protocol v10. ORBIT's signed16 envelope command 77 forms protocol v11.
+Commands 78-81 and MIDI backup object 10 form ORBIT protocol v12.
 
 **v3 (four tracks):** the device has four tracks: 1..3 are synth parts, 4 is the drum track. One
 of them is *selected* (the TRACKS page on the device, or `TRACK`). Every v1 / v2 command acts on the
@@ -47,6 +48,98 @@ after an engine change.
 
 ## Commands
 
+### ORBIT v12: sound-owned macros and SLOOP 2.6 controls
+
+The default build reports 17 engines, 71 track parameters, 45 globals, 64 steps,
+P_E0=63, four tracks and protocol 12. Engine IDs 0..15 stay in place; CLOUD is 16.
+Common IDs 0..52 stay in place. New IDs are INSERT TYPE/A/B/C/MIX=53..57,
+ANALOG FILTER TYPE=58, ENV SYNC=59 and LFO SYNC/TRIG/POL=60..62.
+The eight engine controls are 63..70. Always use INFO counts and live descriptors;
+INSERT labels, ENV time names and engine descriptors can change with the sound.
+
+| cmd | Request args | Reply args |
+| --- | --- | --- |
+| 78 MACRO | track (read), or track, four map bytes (write) | track, rc, four map bytes |
+| 79 UP_GET_MAP | slot | unchanged UP_GET reply, then four map bytes |
+| 80 UP_PUT_MAP | unchanged UP_PUT request, then exactly four map bytes | slot, rc (UP_PUT statuses) |
+| 81 MACRO_DESC | track, parameter ID | track, ID, rc, eligible, fmt, min, max, def, label0, unit0, names0... |
+
+MACRO accepts synth tracks 0..2 and IDs 0..70 or 127 (ENGINE DEFAULT).
+Writes validate the entire frame before changing any assignment. Its rc is
+0 success or 1 invalid track/length/ID; an error returns four 127 bytes.
+Duplicate destinations are legal. Assignment does not change a parameter value.
+MACRO_DESC uses that track's dynamic descriptor and eligibility, not a universal
+engine table. An invalid request returns only `[track,id,1,0]`. Eligible parameters
+have a label other than `--` and a nonempty range; FILTER TYPE is ANALOG-only.
+Names are at most eight characters each, capped at 60. Read through frame end:
+F_INT descriptors can have names too. Unavailable assigned controls remain stored
+but PERFORM shows `--` and does not edit them.
+
+Use WIDE for 79, 80 and 81. Their value fields follow the v11 signed16 encoding;
+MACRO uses ordinary bytes and is not WIDE. Max frames are 271 bytes for
+UP_PUT_MAP, 272 for UP_GET_MAP and 579 for MACRO_DESC. Legacy UP_GET omits maps;
+legacy UP_PUT creates four DEFAULT assignments. UP_STORE and UP_LOAD retain maps.
+Re-read MACRO and dynamic descriptors after RELOAD, track/project/preset changes,
+INSERT TYPE or ENV SYNC changes. Same-value SETs are coalesced only while pending,
+not remembered as permanent state across sounds, tracks or devices.
+
+On FM-1, tap EDIT and turn SELECT to **MACROS**. Each knob selects DEFAULT,
+then eligible parameter IDs in ascending order, one destination per detent.
+The adjacent **PERFORM** page edits the mapped sound values. HOME returns
+directly to Event Tape; subsequent HOME taps alternate Tape and Visualizer.
+The boot Tape view and drum Tape controls remain available. Factory/engine/INIT selection resets
+assignments to engine defaults. Save a customised factory sound as a user preset
+to retain its mapping. Plain parameter edits keep the mapping.
+
+New projects use ORP7 (`0x3750524F`), exactly 3840 bytes, not FUN6. Per-track
+maps are bytes 934..937 of each 940-byte track at project offset 76; user
+provenance is byte 938 and byte 939 is zero. ORP7 stores p[53], raw signed16
+e[8], ten new byte parameters, steps, micro/fill, locks, maps and provenance.
+FUN1..FUN5 remain frozen readers. FUN5 engine IDs/lock IDs 53..60 migrate to
+63..70 and maps default to 127; CLUSTER raw values are never reduced to v14.
+
+User preset banks write OPB2 (`0x3242504F`), 3144 bytes, 16 records of version
+2 and 196 bytes each. Maps occupy record bytes 192..195. UPB1/version1 remains
+read-only (3080-byte bank, 192-byte records) with DEFAULT maps. Decode the
+source record's np before moving its last eight signed16 parameters or map IDs.
+Unknown versions are not guessed. Project snapshots stay authoritative even
+when a tagged user slot is overwritten or erased.
+
+Portable libraries retain format `felucca-library`, write version 2 and accept
+versions 1/2 plus legacy `felucca-patch` version1. Every new patch exports
+`macroIds` (exactly four integers) and `macroPE0` (source common count).
+Absent maps become four 127 entries. Reject malformed fields with a skipped
+reason. Known historical positional counts 53/57/58/61/71 move the engine tail
+by count; identified heterogeneous labeled files still map by keys. Macro IDs
+always use their own source namespace. Resolve engine names before numeric IDs.
+Custom-map application to a pre-v12 device is refused before engine SET or PUT.
+
+New raw backups write `sloop-backup` version2, `product:"ORBIT"`,
+`protocol:12`, `projectMagic:0x3750524F`, firmware, date and objects.
+Version1 remains readable only with ORBIT lineage. Validate the entire file,
+duplicate IDs, lengths, CRCs, project magic/size/FNV and bank shapes before
+any BK_PUT, SMP_BEGIN or SMP_ERASE. Source and target firmware must identify
+ORBIT; ORP7, OPB2 or object10 require an ORBIT protocol>=12 target. FUN6,
+foreign products and unsupported future formats are refused, never guessed.
+Legacy FUN1..FUN5/UPB1 bytes alone cannot prove provenance; local flash and
+direct legacy SysEx retain that limitation. Use named-engine libraries across
+products, not raw backups.
+
+Restore order is 6,7,8,9,2,3,4,5,0,1,10, then samples 32..35. Object10 is
+always listed at 40 bytes: 16 LE uint16 learn entries (32 bytes), three synth
+channels, drum channel/OTHER, bend, three zero bytes. PUT accepts 32/36/40;
+missing fields use defaults. A failed settings flash write does not install
+the candidate MIDI state. Restoring objects1/9 preserves10; old backups without
+10 leave MIDI settings unchanged, while a new default10 clears customised state.
+
+MIDI LEARN remains the actual FM-1 16-entry absolute-CC map, persisted with
+device settings. There is no dedicated editor learn/clear command; the web
+editor preserves it through object10 instead of inventing an unlimited matrix
+or relative encoder decoder. For MiniLab, configure absolute 0..127 CC output.
+Reserved controllers are 0,1,6,11,32,38,64,96..101 and 120..127; they keep
+their native behavior and cannot be learned. Hardware learning is GLO held +
+F#3, then a sound knob and the incoming CC; clear through HOME > SYSTEM.
+
 ### ORBIT v11: signed16 value envelope
 
 When `INFO` reports version 11 or later, value-bearing commands can use
@@ -67,7 +160,7 @@ Plain commands retain their v14 encoding and command numbers.
 CLUSTER is appended as engine 15 in the default registry; existing IDs 0..14 are unchanged.
 Factory raw knobs are signed16. Legacy v14-only clients read values clamped to
 -8192..8191, so preserving original values requires v11.
-FUN5 and user-preset storage retain their existing int16 fields.
+ORP7/OPB2 retain raw signed16 engine controls; FUN5/UPB1 remain legacy readers.
 
 | cmd | Request args | Reply args |
 | --- | --- | --- |

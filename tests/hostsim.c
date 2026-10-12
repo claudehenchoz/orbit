@@ -81,6 +81,7 @@ static void host_tracks_init(void)                /* as felucca_init: defaults, 
     for (k = 0; k < NTRK; k++) {
         for (i = 0; i < P_E0; i++)
             trk[k].p[i] = TP[i].def;
+        memset(trk[k].macro, MACRO_DEFAULT, sizeof trk[k].macro);
         steps_clear(&trk[k]);
     }
     song.master_q12 = 4096;

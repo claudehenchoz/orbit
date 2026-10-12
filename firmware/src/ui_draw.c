@@ -60,7 +60,7 @@ static void draw_head(void)
     uint32_t rec = (song.rec >> song.sel) & 1u ? 2u : song.rec != 0u;   /* 2 the selected track armed, 1 another */
     uint32_t sig = (uint32_t)song.playing * 3u + rec * 5u + (uint32_t)(song.octave + 8) * 11u + song.sel * 13131u +
                    (ui.msg_t ? str_hash(7u, ui.msg) : 0u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
-                   (uint32_t)batt_shown() * 7777u + (usb.config && !usb.suspended) * 99991u;
+                   (uint32_t)batt_shown() * 7777u + (usb.config && !usb.suspended) * 99991u + mlu.on * 7919u;
     if (!ui.force && sig == ui.head_sig)
         return;
     ui.head_sig = sig;
@@ -85,7 +85,9 @@ static void draw_head(void)
         x += 14;
     }
     x = cv_text(x, 1, &FONT_S, b, ui.bpm_t ? C_WHITE : C_HI);   /* white while SELECT turns it */
-    if (song.octave) {
+    if (mlu.on) {                                     /* MIDI LEARN on (2.6, GLO + F#3): in the octave's place */
+        cv_text(x + 12, 1, &FONT_S, "LEARN", C_AMB);
+    } else if (song.octave) {
         str_cpy(b, song.octave > 0 ? "+" : "", 4);
         fmt_int(b + str_len(b), song.octave);
         cv_text(x + 12, 1, &FONT_S, "OCT", C_GRAY);
@@ -360,7 +362,11 @@ static uint32_t str_hash(uint32_t h, const char *s)
 }
 
 /* a page drawn with its values large (graph_big) */
-static int big_page(const page_t *pg) { return pg->graph == GR_NONE && pg->scope != SC_SONG && pg->scope != SC_DRUM; }
+static int big_page(const page_t *pg)            /* (2.6: the INSERT pages too: their middle stayed empty) */
+{
+    return (pg->graph == GR_NONE || pg->graph == GR_INS || pg->graph == GR_PERFORM) &&
+           pg->scope != SC_SONG && pg->scope != SC_DRUM;
+}
 static uint32_t graph_signature(void)
 {
     const page_t *pg = cur_page();
@@ -686,7 +692,10 @@ static void draw_graph(void)
     cv_begin(240, H_GRAPH, C_BLACK);
     cv_oy = G_OY;
     if (ui.home) {
-        graph_scope(c);
+        if (pl_shown()) {
+            cv_oy = 0;
+            graph_browse();
+        } else graph_scope(c);
     } else if (drum_note) {                          /* a page the drum track has no use for */
         static const char *const L[2] = {"DRUM TRACK", "SEQ  TRACKS  GLO DRUMS"};
         cv_text((240 - text_w(&FONT_S, L[0])) / 2, 26, &FONT_S, L[0], C_HI);
@@ -726,6 +735,20 @@ static void draw_graph(void)
             cv_oy = 0;
             graph_user();
             break;
+        case GR_MACROS: {
+            uint32_t k;
+            char b[32];
+            for (k = 0; k < MACRO_COUNT; k++) {
+                uint32_t id = macro_id(t, k);
+                fmt_int(b, (int32_t)k + 1);
+                str_cpy(b + 1, t->macro[k] == MACRO_DEFAULT ? " DEFAULT: " : " ASSIGNED: ", sizeof b - 1u);
+                str_cpy(b + str_len(b), macro_eligible(t, id) ? track_desc(t, id)->label : "--",
+                        sizeof b - str_len(b));
+                cv_text(4, (int32_t)k * 20, &FONT_S, b, TE_COL[k]);
+            }
+            cv_text(4, 84, &FONT_S, "PERFORM / USER: SAVE", C_DIM);
+            break;
+        }
         default:
             if (big_page(pg)) {
                 cv_oy = 0;
@@ -734,8 +757,8 @@ static void draw_graph(void)
             break;
         }
     }
-    top = !ui.home && !drum_note && (pg->graph == GR_BROWSE || pg->graph == GR_SLOTS || pg->graph == GR_USER ||
-                                     big_page(pg));   /* these draw from the top */
+    top = (ui.home && pl_shown()) || (!ui.home && !drum_note && (pg->graph == GR_BROWSE || pg->graph == GR_SLOTS || pg->graph == GR_USER ||
+                                      big_page(pg)));   /* these draw from the top */
     cv_oy = 0;
     if (ui.hot_t && settings.zoom && !(top && big_page(pg) && !drum_note)) {   /* (the big values show it already) */                 /* focus (menu ZOOM): the touched value, large and white */
         int32_t x;
@@ -772,7 +795,7 @@ static void draw_foot(void)
         uint32_t i, n = 0, k = 0;
         const char *pt = pg->scope == SC_ENGINE ? e->page_title[pg->id[0] != P_E0] : 0;   /* EDIT: the engine's */
         for (i = 0; i < NPAGES; i++)
-            if (PAGES[i].fam == pg->fam) {
+            if (PAGES[i].fam == pg->fam && (page_shown(&PAGES[i]) || i == ui.page)) {   /* (the pages it has) */
                 n++;
                 if (i == ui.page)
                     k = n;
@@ -842,6 +865,10 @@ static void draw_columns(void)
         for (c = 0; c < 4u; c++) {
             int16_t *vp;
             const param_desc_t *d = home_param(c, &vp);
+            if (!d || !vp) {
+                draw_column(c, "--", "--", "", C_DIM, -1, ICON_NONE);
+                continue;
+            }
             param_format(d, *vp, val, &unit);
             draw_column(c, d->label, val, unit, VAL(c), RATIO(d, *vp), param_icon(d, *vp));
         }
@@ -894,6 +921,15 @@ static void draw_columns(void)
         draw_column(3, "SAVE", "--", "", C_HI, -1, ICON_AUTO);
         return;
     }
+    if (cur_page()->graph == GR_MACROS) {
+        static const char *const LABEL[4] = {"KNOB1", "KNOB2", "KNOB3", "KNOB4"};
+        for (c = 0; c < MACRO_COUNT; c++) {
+            uint32_t id = macro_id(TSEL, c);
+            draw_column(c, LABEL[c], macro_eligible(TSEL, id) ? track_desc(TSEL, id)->label : "--",
+                        TSEL->macro[c] == MACRO_DEFAULT ? "DEF" : "", VAL(c), -1, ICON_NONE);
+        }
+        return;
+    }
     if (cur_page()->scope == SC_STEP) {
         static const char *const TIME_N[3] = {"NOTE", "TIE", "REST"};
         const step_t *st = &TSEL->step[ui.cursor];
@@ -917,7 +953,13 @@ static void draw_columns(void)
             fmt_int(sl + 1, TSEL->p[P_SLEN]);
             draw_column(0, "STEP", sn, sl, VAL(0u), -1, ICON_AUTO);
             draw_column(1, "NOTE", val, u, step_on(st) ? VAL(1u) : C_DIM, -1, ICON_AUTO);
-            draw_column(2, "TIME", TIME_N[st->time % 3u], "", VAL(2u), -1, ICON_AUTO);
+            if (step_on(st)) {                          /* a note: its LEN (2.6), steps with the TIEs after it */
+                char ln[8];
+                fmt_int(ln, (int32_t)note_len(TSEL, ui.cursor));
+                draw_column(2, "LEN", ln, "STEP", VAL(2u), -1, ICON_AUTO);
+            } else {
+                draw_column(2, "TIME", TIME_N[st->time % 3u], "", VAL(2u), -1, ICON_AUTO);
+            }
             draw_column(3, "FLAG", FLAG_N[(st->flags & SF_ACCENT ? 1u : 0u) | (st->flags & SF_SLIDE ? 2u : 0u)], "",
                         VAL(3u), -1, ICON_AUTO);
         }
@@ -926,6 +968,10 @@ static void draw_columns(void)
     for (c = 0; c < 4u; c++) {
         int16_t *vp;
         const param_desc_t *d = page_desc(cur_page(), c, &vp);
+        if (cur_page()->graph == GR_SLOTS && c == 1u) {   /* 2.6: ERASE, lit while the slot holds a project */
+            draw_column(1, "ERASE", "--", "", project_used((uint32_t)song.g[G_SLOT] - 1u) ? C_HI : C_DIM, -1, ICON_AUTO);
+            continue;
+        }
         if (!d || !d->label || d->label[0] == '-') {
             draw_column(c, "", "", "", C_HI, -1, ICON_AUTO);
             continue;
@@ -961,6 +1007,8 @@ static void ui_timers(void)
         ui.arm = 0;
     if (ui.hot_t)
         ui.hot_t--;
+    if (ui.pl_t)                                     /* the PRESETS list: expires, or closes on navigation */
+        ui.pl_t = pl_shown() ? (uint8_t)(ui.pl_t - 1u) : 0u;
 }
 
 

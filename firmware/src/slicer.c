@@ -95,7 +95,7 @@ static void sl_enter(const track_t *t, sl_t *s)
         s->rec_on = 1;
         s->half_n = 0;
     } else if (s->rec >= 2u * SL_RAMP) {            /* a repeat: the last live step, looped */
-        uint32_t l = s->base / (uint32_t)song.g[G_BPM];   /* (in samples) */
+        uint32_t l = s->base / (uint32_t)clamp(song.g[G_BPM], 20, 300);   /* (in samples) */
         while (l > 2u * SL_LEN)
             l >>= 1;                                /* (a long step: a half, a quarter .. of it) */
         s->loop = l < 2u * s->rec ? l : 2u * s->rec;
@@ -152,7 +152,7 @@ static void sl_seg(const track_t *t, sl_t *s, int16_t *buf, int32_t *b, uint32_t
 /* the step clock over n samples and the SLICER on b (0: the clock only, the track is silent) */
 static void slicer_track(const track_t *t, int32_t *b, uint32_t n)
 {
-    uint32_t k = (uint32_t)(t - trk), i = 0, bpm = (uint32_t)song.g[G_BPM];
+    uint32_t k = (uint32_t)(t - trk), i = 0, bpm = (uint32_t)clamp(song.g[G_BPM], 20, 300);   /* (never 0: a step) */
     sl_t *s = &sl[k];
     int act = b && (t->p[P_SLCR] != SL_OFF || s->gc || s->w);
     while (i < n) {
@@ -191,7 +191,7 @@ static void slicer_drums(int32_t *ml, int32_t *mr, int32_t *rev, int32_t *dly, u
     drums_render_mono(sl_dbuf, n);
     slicer_track(t, sl_dbuf, n);
     {
-        int32_t send = song.g[G_DRREV] * 258, dsend = song.g[G_DRDLY] * 258, pan = t->p[P_PAN];
+        int32_t send = send_thr(song.g[G_DRREV] * 258, thr_rev), dsend = send_thr(song.g[G_DRDLY] * 258, thr_dly), pan = t->p[P_PAN];
         int32_t gl = 4096 - (pan > 0 ? pan * 64 : 0), gr = 4096 + (pan < 0 ? pan * 64 : 0);
         for (i = 0; i < n; i++) {
             int32_t x = sl_dbuf[i];

@@ -52,6 +52,8 @@ static uint32_t saves, loads;
 static int project_used(uint32_t i) { return i < 2; }
 static void project_save(uint32_t i) { (void)i; saves++; ui_message("SAVED"); }
 static void project_load(uint32_t i) { (void)i; loads++; }
+static uint32_t erases;
+static void project_erase(uint32_t i) { (void)i; erases++; ui_message("ERASED"); }
 static void arrangement_save(void) {}
 static uint32_t arrangement_ready(void) { return 3; }
 static void arrangement_apply(uint32_t s) { (void)s; }
@@ -63,6 +65,7 @@ static void section_load(uint32_t s) { sec_loads++; live_sec = (int8_t)s; }
 static uint32_t section_bars(uint32_t s) { (void)s; return 1u; }
 static int up_used(uint32_t k) { return k < 2; }
 static int up_load(uint32_t k) { (void)k; return 0; }
+static int up_load_to(track_t *t, uint32_t k) { (void)t; (void)k; return 0; }
 static uint32_t up_count(void) { return 2; }
 static uint32_t up_nth(uint32_t n) { return n; }
 static uint32_t up_rank(uint32_t s) { return s; }
@@ -112,6 +115,28 @@ static uint32_t strip_white(uint32_t cell)
     uint32_t x, y, n = 0;
     for (y = 20; y < 36u; y++) for (x = 8 + cell * 58u; x < 8 + cell * 58u + 56u; x++) n += screen[y * 240u + x] == 0xFFFFu;
     return n;
+}
+
+/* the seven PRESETS list rows as graph_browse draws them from screen row y0 (canvas row 4 + 17 per row): the name
+ * column's lit pixels and its pure white ones (the current row only) */
+static void list_rows(uint32_t y0, uint32_t lit[7], uint32_t white[7])
+{
+    uint32_t r, x, y;
+    for (r = 0; r < 7u; r++) {
+        lit[r] = white[r] = 0;
+        for (y = y0 + 4u + r * 17u; y < y0 + 18u + r * 17u; y++)
+            for (x = 54; x < 236u; x++) {
+                lit[r] += screen[y * 240u + x] != swap16(C_BLACK);
+                white[r] += screen[y * 240u + x] == swap16(C_WHITE);
+            }
+    }
+}
+static int list_ok(uint32_t y0)
+{
+    uint32_t lit[7], white[7], r, ok = screen[(y0 + 61u) * 240u + 5u] == swap16(C_WHITE);   /* the current row's mark */
+    list_rows(y0, lit, white);
+    for (r = 0; r < 7u; r++) ok &= lit[r] > 0u && (r == 3u ? white[r] > 0u : white[r] == 0u);
+    return (int)ok;
 }
 
 static void check_battery(uint32_t bars, uint16_t color)
@@ -173,6 +198,60 @@ int main(int argc, char **argv)
     check(TSEL->preset==bank_pi[3] && str_eq(ui.msg,"SWARM ORBIT CHOIR"),
           "HOME PRESETS multi-detent display matches the loaded sound");
     ppm("orbit-preset-feedback");
+    {   /* 0.7.0: a PRESETS detent loads the sound at once and shows the seven sounds around it for ~1.5 s
+         * (PL_FRAMES frames); a further detent extends it, a knob or navigation closes it, expiry redraws the page */
+        uint32_t total, k, reel;
+        uint8_t cur0 = orbit_tape.cursor;
+        const engine_t *e;
+        check(pl_shown() && ui.pl_t == PL_FRAMES - 1u, "HOME PRESETS opens the transient list (one frame counted)");
+        e = ENGINES[preset_at(preset_pos(&total), &k)];
+        check(e == ENGINES[TSEL->eng_req] && k == TSEL->preset && str_eq(ui.msg, "SWARM ORBIT CHOIR"),
+              "the list's current row is the loaded sound, its engine still named in the footer");
+        check(list_ok(32), "HOME list: seven rows with names, only the current one white");
+        ppm("orbit070-home-preset-list");
+        frames(30);
+        check(ui.pl_t == PL_FRAMES - 31u, "the list counts down in frames");
+        encs[panel.enc[EN_PRESET]] = -1; frame();
+        check(TSEL->preset == bank_pi[2] && TSEL->eng_req == BANK[2].e && ui.pl_t == PL_FRAMES - 1u,
+              "a further detent auditions the previous sound at once and extends the list");
+        check(list_ok(32), "HOME list follows the newly loaded sound");
+        frames(PL_FRAMES - 2u);
+        check(ui.pl_t == 1u && list_ok(32), "the list is still up one frame before it expires");
+        frame();
+        check(ui.pl_t == 0u && !pl_shown(), "the list expires after PL_FRAMES frames");
+        frame();
+        for (reel = 0, k = 24u * 240u; k < 120u * 240u; k++) reel += screen[k] == swap16(TE_COL[0]);
+        check(screen[93 * 240 + 5] != swap16(C_WHITE) && reel > 0u, "expiry redraws the Tape reels");
+        ppm("orbit070-home-after-expiry");
+        encs[panel.enc[EN_PRESET]] = 1; frame();
+        check(pl_shown() && TSEL->preset == bank_pi[3], "PRESETS opens it again");
+        encs[panel.enc[EN_K1]] = 1; frame();
+        check(ui.pl_t == 0u && orbit_tape.cursor == cur0 + 1u && screen[93 * 240 + 5] != swap16(C_WHITE),
+              "a Tape knob turn closes the list and edits as before");
+        orbit_tape.cursor = cur0;
+        encs[panel.enc[EN_PRESET]] = 1; frame();
+        tap(B_GLO);
+        check(!ui.home && cur_page()->scope == SC_TRK && ui.pl_t == 0u, "navigation (GLO) closes the list");
+        encs[panel.enc[EN_PRESET]] = 1; frame();
+        check(TSEL->preset == bank_pi[5] && pl_shown() && list_ok(36), "mixer PRESETS: auditions and lists in the mixer body");
+        ppm("orbit070-mixer-preset-list");
+        encs[panel.enc[EN_SELECT]] = 1; frame();
+        check(mixer_kind() == MX_PAN && ui.pl_t == 0u, "mixer SELECT pages on and closes the list");
+        frame();
+        check(screen[97 * 240 + 5] != swap16(C_WHITE), "the PAN page is drawn again");
+        ppm("orbit070-mixer-after-dismiss");
+        encs[panel.enc[EN_SELECT]] = -9; frame();
+        open_family(FAM_ENV); frame();
+        {
+            uint32_t eng = TSEL->eng_req, pr = TSEL->preset;
+            encs[panel.enc[EN_PRESET]] = 1; frame();
+            check(TSEL->eng_req == eng && TSEL->preset == pr && !ui.pl_t, "ENV page: PRESETS still loads nothing (guard kept)");
+        }
+        song.sel = TRK_DRUM; go_home(); frame();
+        encs[panel.enc[EN_PRESET]] = 1; frame();
+        check(TDRUM->p[P_E0] == DRUM_DEFAULT_KIT + 1 && !ui.pl_t, "drum track: PRESETS still steps the kit, no sound list");
+        TDRUM->p[P_E0] = DRUM_DEFAULT_KIT; song.sel = 0; go_home(); frame();
+    }
     preset_go(0); ui.msg_t=0; frame(); ppm("orbit-tape");
     tap(B_PLAY); frames(10); check(song.playing,"Tape PLAY reaches real transport"); ppm("orbit-playing");
     tap(B_PLAY); frame(); check(!song.playing,"Tape PLAY stops transport");
@@ -230,8 +309,10 @@ int main(int argc, char **argv)
     check(!orbit_sound_page() && str_eq(cur_page()->title,"FILTER"),"FX again walks to the FILTER subpage, not an enable toggle");
     open_family(FAM_LFO); frame(); ppm("orbit-lfo");
     check(cur_page()->graph==GR_LFO,"LFO opens source page");
+    open_family(FAM_LFO); frame();
+    check(str_eq(cur_page()->title,"LFO 2") && cur_page()->id[0]==P_LSYNC,"LFO second press: LFO 2 (SYNC TRIG POL, 2.6)");
     open_family(FAM_LFO); frame(); ppm("orbit-lfo-dest");
-    check(cur_page()->id[0]==P_LD_PIT && cur_page()->id[3]==P_LD_AMP,"LFO second press opens audible modulation destinations");
+    check(cur_page()->id[0]==P_LD_PIT && cur_page()->id[3]==P_LD_AMP,"LFO third press opens audible modulation destinations");
     check(orbit_module_of(cur_page())==3 && strip_white(3) && !strip_white(0),"LFO DEST shows T4 LFO as the active module");
     encs[panel.enc[EN_K1+3]]=30; frame();
     check(TSEL->p[P_LD_AMP]>0,"LFO DEST KNOB4 updates the actual amplitude depth");
@@ -409,6 +490,14 @@ int main(int argc, char **argv)
         }
         usb.suspended=1; frame(); check_battery(2,C_HI);
         usb.config=0; usb.suspended=0;
+    }
+    {
+        uint32_t i, cloud = 0;
+        bank_resolve();
+        for(i=0;i<NBANK;i++)
+            if(BANK[i].e==ENGI_CLOUD && bank_pi[i]<ENG_CLOUD.npresets)
+                cloud |= 1u<<bank_pi[i];
+        check(cloud==(1u<<ENG_CLOUD.npresets)-1u,"every CLOUD sound is selectable from the preset list");
     }
     printf("ORBIT checks: %d failures\n",fails);
     return fails ? 1 : 0;

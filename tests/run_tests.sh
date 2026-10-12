@@ -39,6 +39,8 @@ python3 tools/gen_op1_cluster.py build/gen/felucca_op1_cluster.h
 
 $CC -O2 -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/cluster_test" tests/cluster_test.c -lm
 run "official cluster: raw presets, kernel cadence, release and shared arena" "$OUT/cluster_test"
+$CC -O2 -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/cloud_test" tests/cloud_test.c -lm
+run "CLOUD: oscillator grains, presets, extrema, release and arena ownership" "$OUT/cloud_test"
 $CC -O2 -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/sample_replacement_test" tests/sample_replacement_test.c -lm
 run "synthesized sample replacements: preserved IDs/data and audible banks" "$OUT/sample_replacement_test"
 $CC -O2 -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/editor_wide_test" tests/editor_wide_test.c -lm
@@ -71,7 +73,15 @@ run "SYN1..SYN4 drum kits and editor protocol v10" "$OUT/dsyn_test"
 $CC -O2 -w -DARENA_STATS -Ibuild/gen -Ifirmware/src -o "$OUT/arena_test" tests/arena_test.c -lm
 run "shared engine arena: clean takeover, ownership and random transitions" "$OUT/arena_test"
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/punch_test" tests/punch_test.c -lm
-run "punch-in FX: 16 effects, bounded, dry after release, FX-held keys" "$OUT/punch_test" "$OUT/punch-fx.wav"
+run "punch-in FX: 27 effects, bounded, dry after release, FX-held keys, FREEZE, THROW, drum mutes" "$OUT/punch_test" "$OUT/punch-fx.wav"
+$CC -O2 -w -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/insert_test" tests/insert_test.c -lm
+run "2.6 sound: INSERT, ANALOG TYPE, mutes, TEXTURE, limiter, THROW, clicks, boundary matrix" "$OUT/insert_test"
+$CC -O2 -w -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/modulation_test" tests/modulation_test.c -lm
+run "2.6 modulation: ENV SYNC, LFO 2 SYNC / TRIG / POL, bend, learn, tempo matrix" "$OUT/modulation_test"
+$CC -O2 -w -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/midi_learn_test" tests/midi_learn_test.c -lm
+run "MIDI settings: learn, channels, IN = CH n, persistence, backup object 10" "$OUT/midi_learn_test"
+$CC -O2 -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/macro_test" tests/macro_test.c -lm
+run "sound macros: MACROS assignment, PERFORM values, presets, projects and backup persistence" "$OUT/macro_test"
 
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -Ifirmware/hal -o "$OUT/ui_pages_test" tests/ui_pages_test.c -lm
 run "live UI: pages, layers (punch, steps, erase, roll, key, mix), holds, drums, REC, fuzz" "$OUT/ui_pages_test" "$OUT"
@@ -79,10 +89,13 @@ run "live UI: pages, layers (punch, steps, erase, roll, key, mix), holds, drums,
 # silently): the UI fuzz, the sequencer, the projects and a minute of random live use, with UBSan
 UBSAN="${CC_UB:-cc} -O1 -w -fsanitize=integer-divide-by-zero -fno-sanitize-recover=integer-divide-by-zero -Ibuild/gen -Ifirmware/src -Ifirmware/hal"
 $UBSAN -o "$OUT/ui_pages_ub" tests/ui_pages_test.c -lm && $UBSAN -o "$OUT/seq2_ub" tests/seq2_test.c -lm &&
-    $UBSAN -o "$OUT/project_ub" tests/project_test.c -lm && $UBSAN -o "$OUT/soak_ub" tests/soak_test.c -lm || fail=1
+    $UBSAN -o "$OUT/project_ub" tests/project_test.c -lm && $UBSAN -o "$OUT/soak_ub" tests/soak_test.c -lm &&
+    $UBSAN -o "$OUT/insert_ub" tests/insert_test.c -lm && $UBSAN -o "$OUT/modulation_ub" tests/modulation_test.c -lm &&
+    $UBSAN -o "$OUT/midi_learn_ub" tests/midi_learn_test.c -lm && $UBSAN -o "$OUT/punch_ub" tests/punch_test.c -lm &&
+    $UBSAN -o "$OUT/editor_wide_ub" tests/editor_wide_test.c -lm || fail=1
 mkdir -p "$OUT/ub"
-run "no divide by zero (UBSan): UI fuzz, sequencer, projects, a minute of live use" \
-    sh -c "'$OUT/ui_pages_ub' '$OUT/ub' >/dev/null && '$OUT/seq2_ub' >/dev/null && '$OUT/project_ub' >/dev/null && '$OUT/soak_ub' 1 >/dev/null && echo 'no divide by zero'"
+run "no divide by zero (UBSan): UI fuzz, sequencer, projects, 2.6 sound / modulation / MIDI boundaries, live use" \
+    sh -c "'$OUT/ui_pages_ub' '$OUT/ub' >/dev/null && '$OUT/seq2_ub' >/dev/null && '$OUT/project_ub' >/dev/null && '$OUT/insert_ub' >/dev/null && '$OUT/modulation_ub' >/dev/null && '$OUT/midi_learn_ub' >/dev/null && '$OUT/punch_ub' '$OUT/ub/punch.wav' >/dev/null && '$OUT/editor_wide_ub' >/dev/null && '$OUT/soak_ub' 1 >/dev/null && echo 'no divide by zero'"
 
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/soak_test" tests/soak_test.c -lm
 run "soak: ${SOAK_MIN:-10} minutes of random live use (bounded, no hanging voices, idle after stop)" "$OUT/soak_test" "${SOAK_MIN:-10}"
@@ -99,6 +112,8 @@ else
     echo "(stress under ASan: this compiler has no AddressSanitizer, skipped)"
 fi
 
+$CC -O2 -Wall -Wextra -o "$OUT/cluster_math_test" tests/cluster_math_test.c
+run "CLUSTER: bit-identical arithmetic without hot-loop division" "$OUT/cluster_math_test"
 $CC -o "$OUT/upreset_test" tests/upreset_test.c
 run "user presets (UP_PUT parser, bank round trip, versions)" "$OUT/upreset_test"
 
@@ -133,7 +148,7 @@ run "DSP render (ANALOG preset 0)" "$OUT/hostsim" 0 0 1 "$OUT/render.wav"
 mkdir -p build/tracks_demo
 run "TRACKS: 4-track pattern, live recording (lengths, swing), voice budget, engine switch, cost" env TRACKS=build/tracks_demo "$OUT/hostsim" 0 0 1 "$OUT/tracks.wav"
 $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/project_test" tests/project_test.c -lm
-run "project formats (FUN4 / FUN3 / FUN2 / FUN1 -> FUN5), capture / apply, autosave" "$OUT/project_test"
+run "project formats (FUN5 / FUN4 / FUN3 / FUN2 / FUN1 -> ORP7, FUN6 refused), capture / apply, macros" "$OUT/project_test"
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/slicer_test" tests/slicer_test.c -lm
 mkdir -p build/slicer_demo
 run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OUT/slicer_test" build/slicer_demo

@@ -30,7 +30,8 @@ enum { ED_INFO = 1, ED_GET, ED_SET, ED_DUMP, ED_DESC, ED_STEP_GET, ED_STEP_SET, 
        ED_FILL_GET, ED_FILL_SET,                                                /* v8: fill conditions */
        ED_FM6_GET = 68, ED_FM6_PUT, ED_FM6_LIST, ED_FM6_ERASE };                /* v9: FM6 patches (Felucca's numbers) */
 #define ED_WIDE 77u
-#define ED_PROTO 11u                                  /* the protocol version at the end of INFO */
+enum { ED_MACRO = 78, ED_UP_GET_MAP, ED_UP_PUT_MAP, ED_MACRO_DESC };   /* v12: HOME macro assignments */
+#define ED_PROTO 12u                                  /* the protocol version at the end of INFO */
 
 static uint8_t ed_out[600];
 static uint32_t ed_n;
@@ -418,6 +419,7 @@ static uint32_t ed_flash_busy(void) { return song.playing || transport_req; }
 _Static_assert(sizeof proj_tmp >= sizeof(project_t) && sizeof proj_tmp >= sizeof(up_bank_t) &&
                sizeof proj_tmp >= sizeof(persist_t), "backup staging");
 static persist_t ed_bk_set;                             /* LIST's snapshot of the settings */
+static uint8_t ed_bk_ml[MIDI_PART];                     /* .. and of the MIDI part (2.6, object 10: project.c) */
 static uint8_t ed_bk_valid, ed_bk_put, ed_bk_id;
 static uint32_t ed_bk_len, ed_bk_crc, ed_bk_pos, ed_bk_ms;
 static void ed_bk_u32(uint32_t v) { uint32_t i; for (i = 0; i < 5u; i++) ed_b((v >> (7u * i)) & 127u); }
@@ -457,6 +459,11 @@ static const uint8_t *ed_bk_obj(uint32_t id, uint32_t *len)   /* 0 = no such obj
         *len = sizeof dsu;
         return (const uint8_t *)&dsu;
     }
+    if (id == 10u) {                                      /* the MIDI settings (project.c MIDI_PART): always listed, the
+                                                         * defaults too (their restore resets a customised FM-1) */
+        *len = sizeof ed_bk_ml;
+        return ed_bk_ml;
+    }
     if (id >= 32u && id < 32u + SMP_USER_SLOTS) {
         const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(id - 32u);
         if (h->magic == SMP_USER_MAGIC && h->version == 1u && h->nz && h->nz <= 16u &&
@@ -466,7 +473,7 @@ static const uint8_t *ed_bk_obj(uint32_t id, uint32_t *len)   /* 0 = no such obj
     }
     return 0;
 }
-static const uint8_t ED_BK_IDS[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 32, 33, 34, 35};
+static const uint8_t ED_BK_IDS[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 32, 33, 34, 35};   /* 10: MIDI settings */
 
 static uint32_t ed_bk_commit(void)
 {
@@ -478,18 +485,21 @@ static uint32_t ed_bk_commit(void)
         return settings_restore(raw, n);
     if (id <= 5u)
         return project_restore(id == 0u ? 4u : id - 2u, raw, n);
-    if (id == 6u || id == 7u) {                           /* a user preset bank (n 0: empty) */
-        const up_bank_t *b = (const up_bank_t *)raw;
+    if (id == 6u || id == 7u) {                           /* a user preset bank (n 0: empty): OPB2, or UPB1 converted */
+        static up_bank_t nb;
+        uint32_t k;
         if (ed_flash_busy())
             return 3;
-        if (n && (n != sizeof *b || b->magic != UP_BANK_MAGIC || b->rsize != sizeof(up_rec_t) || b->nslot != UP_PER_BANK))
+        memset(&nb, 0, sizeof nb);
+        if (n && !up_bank_decode(&nb, raw, (int)n, 1))   /* (every record checked before anything is written) */
             return 2;
-        if (!flash_ok || st_save(OBJ_UPRESET0 + id - 6u, raw, n))
+        if (!flash_ok || st_save(OBJ_UPRESET0 + id - 6u, &nb, n ? sizeof nb : 0u))
             return 4;
-        memset(&up_bank[id - 6u], 0, sizeof up_bank[0]);
-        if (n)
-            memcpy(&up_bank[id - 6u], raw, n);
-        up_bank_check(id - 6u, (int)n);
+        memcpy(&up_bank[id - 6u], &nb, sizeof nb);
+        for (k = 0; k < NTRK; k++)                        /* (a tag of a slot now empty: none) */
+            if (trk[k].user > (id - 6u) * UP_PER_BANK && trk[k].user <= (id - 5u) * UP_PER_BANK &&
+                !up_used(trk[k].user - 1u))
+                trk[k].user = 0;
         up_gen++;
         return 0;
     }
@@ -522,6 +532,11 @@ static uint32_t ed_bk_commit(void)
         persist_saved = p;
         return 0;
     }
+    if (id == 10u) {                                      /* the MIDI settings, written with the settings object */
+        if (ed_flash_busy())
+            return 3;
+        return midi_restore(raw, n);
+    }
     return 1;
 }
 
@@ -534,6 +549,7 @@ static int ed_backup(uint32_t cmd, const uint8_t *a, uint32_t na)   /* 1: a back
         if (!rc) {
             proj_capture((project_t *)ED_BK_RAW);           /* the working project, as it is now */
             persist_fill(&ed_bk_set);
+            midi_part_fill(ed_bk_ml);
             ed_bk_valid = 1;
             ed_bk_put = 0;
         }
@@ -567,7 +583,7 @@ static int ed_backup(uint32_t cmd, const uint8_t *a, uint32_t na)   /* 1: a back
         rc = 1;
         if (!flash_ok) {
             rc = 4;
-        } else if (op == 0u && na == 12u && (id <= 9u)) {  /* begin: id, length (5), CRC-32 (5) */
+        } else if (op == 0u && na == 12u && (id <= 10u)) {  /* begin: id, length (5), CRC-32 (5) */
             len = ed_bk_r32(a + 2);
             if (id >= 2u || len) {                        /* (the working project and the settings are never empty) */
                 if (len <= sizeof proj_tmp) {
@@ -646,7 +662,7 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         case ED_GET: case ED_SET: case ED_DUMP: case ED_DESC:
         case ED_UP_GET: case ED_UP_PUT: case ED_TRACK: case ED_TRACK_MIX:
         case ED_TRACK_DUMP: case ED_TRACK_PARAM: case ED_LOCK_GET: case ED_LOCK_SET:
-        case ED_WATCH:
+        case ED_WATCH: case ED_UP_GET_MAP: case ED_UP_PUT_MAP: case ED_MACRO_DESC:
             ed_wide = 1;
             break;
         default:                                        /* reject recursion and commands without value fields */
@@ -720,8 +736,9 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_v(d->def);
         ed_str(d->label, 8);
         ed_str(d->unit, 8);
-        if (d->fmt == F_ENUM && d->names)
-            for (i = 0; i <= (uint32_t)(d->max - d->min) && i < 64u; i++)   /* (the 34 drum kits) */
+        if (d->names)
+            for (i = 0; i < 64u && (d->fmt == F_ENUM ? i <= (uint32_t)(d->max - d->min)
+                                                       : d->fmt == F_INT && i < 60u && d->names[i]); i++)
                 ed_str(d->names[i], 8);
         break;
     case ED_STEP_GET:
@@ -854,7 +871,8 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         }
         break;
     }
-    case ED_UP_GET: {                                      /* slot -> slot, used, engine, name, P_COUNT x v14, 16 x (note, flags) */
+    case ED_UP_GET:                                        /* slot -> slot, used, engine, name, P_COUNT x v14, 16 x (note, flags) */
+    case ED_UP_GET_MAP: {                                  /* (v12: then the four macro assignments) */
         int16_t v[P_COUNT];
         char nm[13] = {0};
         const up_rec_t *r;
@@ -877,14 +895,26 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             ed_b(u ? r->note[i] : 0u);
             ed_b(u ? r->flags[i] : 0u);
         }
+        for (i = 0; cmd == ED_UP_GET_MAP && i < MACRO_COUNT; i++)
+            ed_b(u ? up_macro(r, i) : MACRO_DEFAULT);
         break;
     }
-    case ED_UP_PUT: {                                      /* slot, engine, name, values, pattern -> slot, rc */
+    case ED_UP_PUT:                                        /* slot, engine, name, values, pattern -> slot, rc */
+    case ED_UP_PUT_MAP: {                                  /* (v12: then exactly four macro assignments) */
         static up_rec_t r;
-        uint32_t slot = 0, rc;
-        if (na < 1u)
+        uint32_t slot = 0, rc, nm = cmd == ED_UP_PUT_MAP ? MACRO_COUNT : 0u;
+        if (na < 1u + nm)
             return;
-        rc = (uint32_t)up_parse_width(a, na, &r, &slot, width);
+        rc = (uint32_t)up_parse_width(a, na - nm, &r, &slot, width);
+        if (!rc && nm && (cmd == ED_UP_PUT_MAP && width != 3u))
+            rc = 1;                                        /* (the map command is WIDE only: an exact frame) */
+        for (i = 0; !rc && i < nm; i++) {
+            uint32_t m = a[na - nm + i];
+            if (m >= P_COUNT && m != MACRO_DEFAULT)
+                rc = 1;                                    /* (the whole frame checked before the record changes) */
+            else
+                r.macro[i] = (uint8_t)m;
+        }
         if (!rc) {
             int16_t v[P_COUNT];
             up_values(&r, v);                              /* each value inside its range */
@@ -925,6 +955,53 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_b(a[0]);
         ed_b(a[0] >= UP_SLOTS ? 1u : ed_flash_busy() ? 3u : up_put(a[0], 0) ? 2u : 0u);
         break;
+    case ED_MACRO: {                                       /* track [, m0 m1 m2 m3] -> track, rc, m0 m1 m2 m3 */
+        uint32_t rc = na != 1u && na != 1u + MACRO_COUNT ? 1u : a[0] >= NPART ? 1u : 0u;
+        for (i = 0; !rc && na > 1u && i < MACRO_COUNT; i++)
+            if (a[1 + i] >= P_COUNT && a[1 + i] != MACRO_DEFAULT)
+                rc = 1;
+        if (!rc && na > 1u) {
+            fm1_irq_off();
+            for (i = 0; i < MACRO_COUNT; i++)
+                trk[a[0]].macro[i] = a[1 + i];
+            fm1_irq_on();
+            sync_reload = 1;                               /* (watchers read the assignments again) */
+            ui.force = 1;
+        }
+        ed_b(na ? a[0] : 127u);
+        ed_b(rc);
+        for (i = 0; i < MACRO_COUNT; i++)
+            ed_b(rc ? MACRO_DEFAULT : trk[a[0]].macro[i]);
+        break;
+    }
+    case ED_MACRO_DESC: {                                  /* track, id -> track, id, rc, eligible, fmt, min, max, def,
+                                                            * label, unit, enum names (at most 60) */
+        const track_t *t;
+        if (na != 2u || a[0] >= NPART || a[1] >= P_COUNT) {
+            ed_b(na ? a[0] : 127u);
+            ed_b(na > 1u ? a[1] : 127u);
+            ed_b(1);
+            ed_b(0);
+            break;
+        }
+        t = &trk[a[0]];
+        d = track_desc(t, a[1]);
+        ed_b(a[0]);
+        ed_b(a[1]);
+        ed_b(0);
+        ed_b((uint32_t)macro_eligible(t, a[1]));
+        ed_b(d->fmt);
+        ed_v(d->min);
+        ed_v(d->max);
+        ed_v(d->def);
+        ed_str(d->label, 8);
+        ed_str(d->unit, 8);
+        if (d->names)
+            for (i = 0; i < 60u && (d->fmt == F_ENUM ? i <= (uint32_t)(d->max - d->min)
+                                                       : d->fmt == F_INT && d->names[i]); i++)
+                ed_str(d->names[i], 8);
+        break;
+    }
     case ED_WATCH:                                         /* on -> on */
         if (na < 1u)
             return;

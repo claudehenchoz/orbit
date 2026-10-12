@@ -25,6 +25,7 @@ static void orbit_edit(int drop)
         ui_message(orbit_tape.lift ? "LIFTED: OCT+ DROP" : "COPIED: OCT+ DROP");
     }
     sync_reload = 1;
+    ui.pl_t = 0;
     ui.force = 1;
 }
 /* Circular graphics use the existing fixed-point sine table, without a framebuffer. */
@@ -48,10 +49,11 @@ static void orbit_reel(int32_t cx,int32_t cy,int32_t r,uint32_t phase,uint16_t c
     }
     te_disc(cx,cy,3,C_WHITE);
 }
+static void graph_browse(void);   /* ui_draw.c: the seven-row preset list */
 static void orbit_screen_draw(void)
 {
     static uint32_t cache;
-    uint32_t i,j,sig=orbit_tape.revision+song.sel*17u+song.rec*97u+song.playing;
+    uint32_t i,j,total,pl=pl_shown() ? preset_pos(&total)+1u : 0u,sig=pl*7919u+orbit_tape.revision+song.sel*17u+song.rec*97u+song.playing;
     char b[16];
     const char *const labels[4]={"head","in","out","edit"};
     orbit_knob(4,0);
@@ -68,6 +70,16 @@ static void orbit_screen_draw(void)
     cv_text(8,2,&FONT_S,"tape",C_WHITE); cv_text(64,2,&FONT_S,"events",TE_G3);
     fmt_int(b,song.g[G_BPM]); cv_text(168,2,&FONT_S,b,TE_G4);
     te_play_icon(196,2,song.playing); draw_battery(0); cv_blit(0,0);
+    if(pl) {
+        /* PRESETS turned: the sounds around the one just loaded replace reels and lanes for a moment */
+        lcd_fill(0,24,240,8,C_BLACK);
+        cv_begin(240,124,C_BLACK); cv_oy=0; graph_browse(); cv_blit(0,32);
+        cv_begin(240,40,C_BLACK);
+        cv_text(8,12,&FONT_S,"presets",TE_G3);
+        fmt_int(b,(int32_t)pl); str_cpy(b+str_len(b),"/",sizeof b-str_len(b));
+        fmt_int(b+str_len(b),(int32_t)total); cv_text(168,12,&FONT_S,b,TE_G4);
+        cv_blit(0,156);
+    } else {
     cv_begin(240,96,C_BLACK);
     {
         uint32_t pos=song.playing ? TSEL->seq_idx : orbit_tape.cursor, phase=(pos*89u)&1023u;
@@ -93,6 +105,7 @@ static void orbit_screen_draw(void)
         }
     }
     cv_blit(0,120);
+    }
     cv_begin(240,44,C_BLACK);
     if(ui.msg_t) cv_text(4,14,&FONT_S,ui.msg,C_WHITE);
     else for(i=0;i<4;i++) {

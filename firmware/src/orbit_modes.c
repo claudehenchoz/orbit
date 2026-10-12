@@ -47,7 +47,7 @@ static void orbit_sound_draw(void)
     cache=sig;
     cv_begin(240,36,C_BLACK);
     str_cpy(title,pg->scope==SC_ENGINE ? engine->name : pg->fam==FAM_LFO ?
-            (pg->graph==GR_LFO ? "LFO SOURCE 1/2" : "LFO DEST 2/2") : pg->title,sizeof title);
+            (pg->id[0]==P_LSYNC ? "LFO SYNC 2/3" : pg->graph==GR_LFO ? "LFO SOURCE 1/3" : "LFO DEST 3/3") : pg->title,sizeof title);
     cv_text(8,2,&FONT_S,title,C_WHITE);
     fmt_int(small,song.sel+1); cv_text(198,2,&FONT_S,small,TE_COL[song.sel]);
     draw_battery(0);
@@ -130,6 +130,7 @@ static void orbit_mixer_draw(void)
     for(k=0;k<NTRK;k++) sig=sig*31u+trk[k].p[P_LEVEL]+trk[k].p[P_MUTE]*521u+trk[k].p[P_PAN]*17u+trk[k].eng_req*97u;
     sig=sig*31u+song.g[G_DRLVL];
     sig=sig*31u+(uint32_t)batt_shown();
+    if(pl_shown()) { uint32_t total; sig=sig*31u+preset_pos(&total)+1u+TSEL->user*257u+up_gen*7919u; }
     if(ui.force || sig!=cache) {
         cache=sig;
         cv_begin(240,36,C_BLACK);
@@ -141,7 +142,8 @@ static void orbit_mixer_draw(void)
         } else str_cpy(hint,pan?"pan 1-4 / select: level":"level 1-4 / select: pan",sizeof hint);
         cv_text(8,20,&FONT_S,hint,TE_G3); cv_blit(0,0);
         cv_begin(240,124,C_BLACK);
-        for(k=0;k<NTRK;k++) {
+        if(pl_shown()) { cv_oy=0; graph_browse(); }   /* PRESETS turned: the sounds around the one just loaded */
+        else for(k=0;k<NTRK;k++) {
             int32_t cx=30+(int32_t)k*60,level=(int32_t)trk_level(k),j;
             uint16_t col=trk_silent(&trk[k])?TE_DIM[k]:TE_COL[k];
             fmt_int(b,(int32_t)k+1); cv_text(cx-4,2,&FONT_S,b,col);

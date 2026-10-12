@@ -5,32 +5,57 @@
  * records each, mirrored in RAM so browsing never reads flash. A record:
  * engine, name, the instrument parameters, a 16-step pattern.
  *
- * A bank whose magic, record size or slot count differ reads as empty; so
- * does a record with another UP_VER. A record keeps np = the P_COUNT it was
- * stored with; when that differs it is mapped by count: its last 8 values
- * are P_E0..P_E7, the first np - 8 are P_LEVEL.. in order, missing ones take
- * their defaults. So common parameters may only be added just before P_E0
- * (else bump UP_VER).
+ * Banks: "OPB2" (ORBIT 0.7.0, written): 196-byte records of version 2, the
+ * sound plus its four HOME macro assignments. "UPB1" (before, frozen): 192-byte
+ * records of version 1, no assignments; read and converted in RAM (macros: the
+ * engine's own), written as OPB2 at the next save. A bank of another shape reads
+ * as empty; so does a record of another version (never reinterpreted). A record
+ * keeps np = the P_COUNT it was stored with; when that differs it is mapped by
+ * count: its last 8 values are P_E0..P_E7, the first np - 8 are P_LEVEL.. in
+ * order, missing ones take their defaults; a macro id the same way. So common
+ * parameters may only be added just before P_E0.
  *
  * With -DUP_HOST (host test) only the part above #ifndef UP_HOST is built;
  * it needs nothing but core.h. */
 #define UP_PER_BANK 16u
 #define UP_PMAX 72u                              /* room for P_COUNT to grow */
 #define UP_USED 0xA5u
-#define UP_VER 1u
-#define UP_BANK_MAGIC 0x31425055u                /* "UPB1" */
+#define UP_VER 2u
+#define UP_BANK_MAGIC 0x3242504Fu                /* "OPB2" (bytes 4F 50 42 32) */
+#define UP_RECORD 196u
+#define UP_BANK_SIZE 3144u
+#define UP_VER_V1 1u
+#define UP_BANK_MAGIC_V1 0x31425055u             /* "UPB1": read only */
+#define UP_RECORD_V1 192u
+#define UP_BANK_SIZE_V1 3080u
 typedef struct {
     uint8_t used, ver, engine, np;               /* UP_USED, UP_VER, engine, P_COUNT when stored */
     char name[12];                               /* ASCII 32..126, 0-padded (no 0 when 12 long) */
     int16_t p[UP_PMAX];
     uint8_t note[16], flags[16];                 /* note 0 = rest; flags 1 accent, 2 slide, 4 tie */
+    uint8_t macro[MACRO_COUNT];                  /* HOME KNOB 1..4: a P_* id (np's numbering), MACRO_DEFAULT */
 } up_rec_t;
 typedef struct {
     uint32_t magic;
     uint16_t rsize, nslot;
     up_rec_t r[UP_PER_BANK];
 } up_bank_t;
-_Static_assert(sizeof(up_rec_t) == 192, "user preset record layout");
+typedef struct {                                 /* version 1 (until ORBIT 0.6), frozen */
+    uint8_t used, ver, engine, np;
+    char name[12];
+    int16_t p[UP_PMAX];
+    uint8_t note[16], flags[16];
+} up_rec_v1_t;
+typedef struct {
+    uint32_t magic;
+    uint16_t rsize, nslot;
+    up_rec_v1_t r[UP_PER_BANK];
+} up_bank_v1_t;
+_Static_assert(sizeof(up_rec_t) == UP_RECORD && __builtin_offsetof(up_rec_t, p) == 16u &&
+               __builtin_offsetof(up_rec_t, note) == 160u && __builtin_offsetof(up_rec_t, flags) == 176u &&
+               __builtin_offsetof(up_rec_t, macro) == 192u && sizeof(up_bank_t) == UP_BANK_SIZE &&
+               __builtin_offsetof(up_bank_t, r) == 8u, "OPB2 record and bank layout");
+_Static_assert(sizeof(up_rec_v1_t) == UP_RECORD_V1 && sizeof(up_bank_v1_t) == UP_BANK_SIZE_V1, "UPB1 as stored");
 _Static_assert(P_COUNT <= UP_PMAX && P_COUNT < 128, "user preset record: P_COUNT");
 static up_bank_t up_bank[UP_SLOTS / UP_PER_BANK];
 
@@ -41,16 +66,26 @@ static int up_valid(const up_rec_t *r)
     return r->used == UP_USED && r->ver == UP_VER && r->engine < NENGINES && r->np >= 8u && r->np <= UP_PMAX &&
            r->name[0];
 }
+static int up_empty(const void *r, uint32_t n)    /* a record of all zeros: an empty slot */
+{
+    const uint8_t *b = (const uint8_t *)r;
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        if (b[i])
+            return 0;
+    return 1;
+}
+/* the record's macro k in today's numbering, MACRO_DEFAULT when it has none this firmware knows */
+static uint32_t up_macro(const up_rec_t *r, uint32_t k)
+{
+    uint32_t m = r->macro[k & 3u], id;
+    if (m == MACRO_DEFAULT)
+        return MACRO_DEFAULT;
+    id = param_id_by_count(m, r->np);
+    return id < P_COUNT ? id : MACRO_DEFAULT;
+}
 
 static int up_used(uint32_t k) { return k < UP_SLOTS && up_valid(up_rec(k)); }
-
-static void up_bank_check(uint32_t b, int len)  /* after loading bank b (len bytes, -1 = none): wrong shape -> empty */
-{
-    up_bank_t *bk = &up_bank[b];
-    if (len != (int)sizeof *bk || bk->magic != UP_BANK_MAGIC || bk->rsize != sizeof(up_rec_t) ||
-        bk->nslot != UP_PER_BANK)
-        memset(bk, 0, sizeof *bk);
-}
 
 /* the record's values in today's P_* order (mapped by count, see above); def = the defaults */
 static void up_params(const up_rec_t *r, int16_t *out, const int16_t *def)
@@ -60,6 +95,70 @@ static void up_params(const up_rec_t *r, int16_t *out, const int16_t *def)
         out[i] = i < nc ? r->p[i] : def[i];
     for (i = 0; i < 8u; i++)
         out[P_E0 + i] = r->p[nc + i];
+}
+
+/* a stored bank (n bytes of src: OPB2, or UPB1 converted) -> dst as OPB2. strict (a backup restore): a nonempty
+ * record that is not valid rejects the bank; else (boot) it reads as empty, its neighbours kept. 1 = done; 0 = not a
+ * bank this firmware reads (dst untouched). src and dst are distinct */
+static int up_bank_decode(up_bank_t *dst, const void *src, int n, int strict)
+{
+    uint32_t magic, i, k;
+    if (n < 8 || src == (const void *)dst)
+        return 0;
+    memcpy(&magic, src, 4);
+    if (magic == UP_BANK_MAGIC) {
+        const up_bank_t *b = (const up_bank_t *)src;
+        if (n != (int)UP_BANK_SIZE || b->rsize != UP_RECORD || b->nslot != UP_PER_BANK)
+            return 0;
+        for (i = 0; strict && i < UP_PER_BANK; i++)
+            if (!up_empty(&b->r[i], UP_RECORD) && !up_valid(&b->r[i]))
+                return 0;
+        memcpy(dst, b, sizeof *dst);
+        for (i = 0; i < UP_PER_BANK; i++) {
+            up_rec_t *r = &dst->r[i];
+            if (!up_valid(r)) {
+                memset(r, 0, sizeof *r);
+                continue;
+            }
+            for (k = 0; k < MACRO_COUNT; k++)               /* (an id of no parameter: the engine's own) */
+                if (r->macro[k] != MACRO_DEFAULT && param_id_by_count(r->macro[k], r->np) >= P_COUNT)
+                    r->macro[k] = MACRO_DEFAULT;
+        }
+        return 1;
+    }
+    if (magic == UP_BANK_MAGIC_V1) {
+        const up_bank_v1_t *b = (const up_bank_v1_t *)src;
+        if (n != (int)UP_BANK_SIZE_V1 || b->rsize != UP_RECORD_V1 || b->nslot != UP_PER_BANK)
+            return 0;
+        for (i = 0; strict && i < UP_PER_BANK; i++) {
+            const up_rec_v1_t *s = &b->r[i];
+            if (!up_empty(s, UP_RECORD_V1) && !(s->used == UP_USED && s->ver == UP_VER_V1 && s->engine < NENGINES &&
+                                                s->np >= 8u && s->np <= UP_PMAX && s->name[0]))
+                return 0;
+        }
+        memset(dst, 0, sizeof *dst);
+        dst->magic = UP_BANK_MAGIC;
+        dst->rsize = UP_RECORD;
+        dst->nslot = UP_PER_BANK;
+        for (i = 0; i < UP_PER_BANK; i++) {
+            const up_rec_v1_t *s = &b->r[i];
+            up_rec_t *r = &dst->r[i];
+            if (!(s->used == UP_USED && s->ver == UP_VER_V1 && s->engine < NENGINES && s->np >= 8u && s->np <= UP_PMAX &&
+                  s->name[0]))
+                continue;                                   /* (empty) */
+            r->used = UP_USED;
+            r->ver = UP_VER;
+            r->engine = s->engine;
+            r->np = s->np;                                  /* (the values as stored: mapped by count when read) */
+            memcpy(r->name, s->name, sizeof r->name);
+            memcpy(r->p, s->p, sizeof r->p);
+            memcpy(r->note, s->note, sizeof r->note);
+            memcpy(r->flags, s->flags, sizeof r->flags);
+            memset(r->macro, MACRO_DEFAULT, sizeof r->macro);
+        }
+        return 1;
+    }
+    return 0;
 }
 
 static int up_name_ok(const uint8_t *s, uint32_t n)   /* 1..12 printable ASCII */
@@ -136,6 +235,7 @@ static int up_parse_width(const uint8_t *a, uint32_t na, up_rec_t *r, uint32_t *
     r->ver = UP_VER;
     r->engine = a[1];
     r->np = P_COUNT;
+    memset(r->macro, MACRO_DEFAULT, sizeof r->macro);   /* (UP_PUT carries no assignment: the engine's own) */
     for (i = 0; i < n; i++)
         r->name[i] = (char)a[2 + i];
     for (i = 0; i < P_COUNT; i++, k += width)
@@ -171,12 +271,19 @@ static void up_values(const up_rec_t *r, int16_t *v)   /* mapped and clamped for
         v[i] = (int16_t)clamp(v[i], up_desc(r->engine, i)->min, up_desc(r->engine, i)->max);
 }
 
-static void up_boot(void)                      /* persist_boot: the banks from flash */
+/* persist_boot: the banks from flash, each read into the staging (cap bytes: an object fits) and decoded into its
+ * RAM mirror; a bank of another shape reads as empty */
+static void up_boot(void *stage, uint32_t cap)
 {
 #if FELUCCA_FLASH
     uint32_t b;
-    for (b = 0; b < UP_SLOTS / UP_PER_BANK; b++)
-        up_bank_check(b, flash_ok ? st_load(OBJ_UPRESET0 + b, &up_bank[b], sizeof up_bank[b]) : -1);
+    for (b = 0; b < UP_SLOTS / UP_PER_BANK; b++) {
+        int n = flash_ok ? st_load(OBJ_UPRESET0 + b, stage, cap) : -1;
+        if (!up_bank_decode(&up_bank[b], stage, n, 0))
+            memset(&up_bank[b], 0, sizeof up_bank[b]);
+    }
+#else
+    (void)stage, (void)cap;
 #endif
 }
 
@@ -226,6 +333,8 @@ static int up_store(uint32_t k, const char *name)
     r.ver = UP_VER;
     r.engine = TSEL->eng_req;
     r.np = P_COUNT;
+    for (i = 0; i < MACRO_COUNT; i++)
+        r.macro[i] = (uint8_t)(TSEL->macro[i] < P_COUNT ? TSEL->macro[i] : MACRO_DEFAULT);
     if (name && name[0]) {
         for (i = 0; i < 12u && name[i]; i++)
             r.name[i] = name[i];
@@ -239,7 +348,7 @@ static int up_store(uint32_t k, const char *name)
             r.name[i] = b[i];
     }
     for (i = 0; i < P_COUNT; i++)
-        r.p[i] = TSEL->p[i];
+        r.p[i] = trk_base_value(TSEL, i);              /* (a lock in force: the value under it) */
     up_pat_from(&r, TSEL->step);
     return up_put(k, &r);
 }
@@ -248,12 +357,11 @@ static int up_store(uint32_t k, const char *name)
  * PAN, MUTE: the TRACKS faders) and its pattern parameters (param_kept). LIVE: the pattern
  * stored in the record is not loaded: changing the sound never changes the sequence.
  * 0 ok, 1 empty (or the drum track is selected) */
-static int up_load(uint32_t k)
+static int up_load_to(track_t *t, uint32_t k)       /* user preset k into track t (2.6: any track, MIDI PC) */
 {
     const up_rec_t *r;
     int16_t v[P_COUNT];
     uint32_t i;
-    track_t *t = TSEL;
     if (!up_used(k) || is_drum(t))
         return 1;
     r = up_rec(k);
@@ -261,19 +369,24 @@ static int up_load(uint32_t k)
     for (i = 0; i < P_COUNT; i++)                       /* (LEN etc. of a kept pattern changed too, and */
         if (param_kept(i))                              /* a preset pattern then counted as edited) */
             v[i] = t->p[i];
-    panic_req |= (uint8_t)(1u << song.sel);
+    sound_change(t);                                    /* (2.6: what sounds fades out with the old sound, no click) */
+    panic_req |= (uint8_t)(1u << trk_index(t));
     fm1_irq_off();                                      /* the audio ISR must not see half a sound */
     t->eng_req = r->engine;
     for (i = 0; i < P_COUNT; i++)
         t->p[i] = v[i];
+    for (i = 0; i < MACRO_COUNT; i++)
+        t->macro[i] = (uint8_t)up_macro(r, i);
     t->preset = 0;
     fm1_irq_on();
     fm6_track_loaded(t);                                /* FM6: a user preset holds the PTCH and the macros */
     t->user = (uint8_t)(k + 1u);
-    sync_reload = 1;
+    if (t == TSEL)
+        sync_reload = 1;
     ui.force = 1;
     return 0;
 }
+static int up_load(uint32_t k) { return up_load_to(TSEL, k); }   /* into the selected track */
 
 static uint32_t up_count(void)                 /* used slots */
 {

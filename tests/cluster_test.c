@@ -59,6 +59,57 @@ static void adapter_case(uint32_t pi, int release)
     assert(!eng_arena_bad);
 }
 
+static void mixed_case(void)
+{
+    static const uint32_t engines[NPART] = {ENGI_CLOUD, ENGI_GRAIN, ENGI_CLUSTER};
+    uint64_t hashes[2][NPART] = {{0}};
+    uint32_t run, p, b, i;
+    int32_t out[CTL + 2];
+    /* Given: identical CLOUD/GRAIN/CLUSTER phrases, in isolation and in a concurrent mix. */
+    for (run = 0; run < 2u; run++) {
+        for (p = 0; p < NPART; p++) {
+            memset(trk, 0, sizeof trk);
+            memset(eng_arena_own, 0, sizeof eng_arena_own);
+            host_tracks_init();
+            for (i = 0; i < NPART; i++)
+                if (run || i == p) {
+                    host_preset(&trk[i], engines[i], 0);
+                    trk[i].p[P_ATK] = 0;
+                    trk_note_on(&trk[i], 48u + i * 7u, 100);
+                }
+            for (b = 0; b < 2048u; b++) {
+                for (i = 0; i < NPART; i++)
+                    if ((run || i == p) && i != p) {
+                        eng_arena_t saved = eng_arena[p];
+                        track_render(&trk[i], out + 1, CTL);
+                        assert(!memcmp(&saved, &eng_arena[p], sizeof saved));
+                    }
+                /* When: advance all active parts in the same control tick. */
+                out[0] = 123456789;
+                out[CTL + 1] = 987654321;
+                track_render(&trk[p], out + 1, CTL);
+                /* Then: each part is audible, guarded and identical to its isolated phrase. */
+                assert(out[0] == 123456789 && out[CTL + 1] == 987654321);
+                for (i = 0; i < CTL; i++)
+                    hashes[run][p] = hashes[run][p] * 0x100000001b3ull ^ (uint32_t)out[i + 1];
+                assert(eng_arena_own[p] == engines[p] + 1u);
+            }
+            assert(hashes[run][p]);
+            for (i = 0; i < NPART; i++)
+                trk_all_off(&trk[i]);
+            for (b = 0; b < 16000u; b++)
+                for (i = 0; i < NPART; i++)
+                    if (run || i == p)
+                        track_render(&trk[i], out + 1, CTL);
+            for (i = 0; i < NPART * NVOICE; i++)
+                assert(!trk[i / NVOICE].v[i % NVOICE].active);
+        }
+    }
+    for (p = 0; p < NPART; p++)
+        assert(hashes[0][p] == hashes[1][p]);
+    assert(!eng_arena_bad);
+}
+
 int main(void)
 {
     uint32_t pi, b, p, count = 0;
@@ -100,6 +151,8 @@ int main(void)
         for (pi = 0; pi < NVOICE; pi++)
             assert(!trk[p].v[pi].active);
     assert(!eng_arena_bad);
+    mixed_case();
     puts("PASS: 16 raw patches, 128/32 cadence, PCM/state/PRNG, release, guards, multi-part voices");
+    puts("PASS: concurrent CLOUD/GRAIN/CLUSTER identical to isolated parts, independent arenas and release");
     return 0;
 }

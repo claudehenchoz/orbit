@@ -221,6 +221,11 @@ def installs():
     rc, out, err = cli(["--info"], dev)
     ok(rc == 0 and "FM-1_905" in out and "running" in out and dev.upgrades == 0, "--info: identity of the connected FM-1")
 
+    for name in ("SLOOP", "Clipper"):
+        dev = FakeFM1(image, identity="FM-1_900", name=name)
+        rc, out, err = cli(["--info"], dev)
+        ok(rc == 0 and "FM-1_900" in out and dev.upgrades == 0, f"--info: {name} port found without an update")
+
     dev = FakeFM1(image, identity="ota-FM-1_900", name="Felucca Update")
     rc, out, err = cli(["--info"], dev)
     ok(rc == 0 and "update loader" in out, "--info: device in update mode")

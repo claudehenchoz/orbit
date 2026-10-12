@@ -189,3 +189,12 @@ cpu/CLUSTER/12_sqeek_bend 3253
 cpu/CLUSTER/13_streengs 3299
 cpu/CLUSTER/14_trans4m 3250
 cpu/CLUSTER/15_xyz_files 3274
+# First CLOUD macOS cc -O2 instruction-counter measurement: 2026-10-12; existing budgets/tolerances retained.
+cpu/CLOUD/00_CIRRUS 1309
+cpu/CLOUD/01_SILVER_MIST 1324
+cpu/CLOUD/02_GLASS_RAIN 969
+cpu/CLOUD/03_EMBER 1657
+cpu/CLOUD/04_SKY_FIFTHS 1315
+cpu/CLOUD/05_COMET_TAIL 1544
+cpu/CLOUD/06_DUST_PULSE 833
+cpu/CLOUD/07_LOW_STRATUS 1332

@@ -140,6 +140,38 @@ int main(void)
         bad += check("oversize two-part object refused",
                      st_save2(OBJ_SETTINGS, p2, 3000, p2, 1000) == -1);
     }
+    {   /* SAVE > PROJECT > ERASE: an object of no bytes; a load reads 0 bytes, the next save works as ever */
+        static uint8_t a2[3840], got3[3840];
+        memset(a2, 'P', sizeof a2);
+        bad += check("erase: a 3840-byte ORP7-sized project saved", st_save(OBJ_PROJECT0 + 2u, a2, sizeof a2) == 0);
+        bad += check("erase: the empty object written", st_save(OBJ_PROJECT0 + 2u, a2, 0) == 0);
+        n = st_load(OBJ_PROJECT0 + 2u, got3, sizeof got3);
+        bad += check("erase: loads 0 bytes (an empty slot)", n == 0);
+        bad += check("erase: saved again", st_save(OBJ_PROJECT0 + 2u, a2, sizeof a2) == 0 &&
+                     st_load(OBJ_PROJECT0 + 2u, got3, sizeof got3) == (int)sizeof a2 && !memcmp(got3, a2, sizeof a2));
+    }
+    {   /* settings in three parts (persist 88, SYN kits 1464, MIDI 40): one CRC, one commit header, torn writes */
+        static uint8_t s1[88], s2[1464], s3[40], all[1592], got4[1592];
+        int f;
+        memset(s1, 'S', sizeof s1), memset(s2, 'K', sizeof s2), memset(s3, 'M', sizeof s3);
+        memcpy(all, s1, sizeof s1), memcpy(all + 88, s2, sizeof s2), memcpy(all + 1552, s3, sizeof s3);
+        bad += check("3 parts: saved", st_save3(OBJ_SETTINGS, s1, sizeof s1, s2, sizeof s2, s3, sizeof s3) == 0);
+        n = st_load(OBJ_SETTINGS, got4, sizeof got4);
+        bad += check("3 parts: 1592 bytes back in order", n == 1592 && !memcmp(got4, all, sizeof all));
+        memset(s3, 'N', sizeof s3);
+        for (f = 0; f < 8; f++) {                         /* torn at every program: the last whole object stays */
+            fail_after = f;
+            st_save3(OBJ_SETTINGS, s1, sizeof s1, s2, sizeof s2, s3, sizeof s3);
+            fail_after = -1;
+            n = st_load(OBJ_SETTINGS, got4, sizeof got4);
+            if (n != 1592 || memcmp(got4, all, sizeof all))
+                break;
+        }
+        bad += check("3 parts: a write torn at any of 8 points keeps the last object", f == 8);
+        bad += check("3 parts: too big for a sector: refused", st_save3(OBJ_SETTINGS, s2, 1464, s2, 1464, s2, 1000) == -1);
+        bad += check("3 parts, the third empty: the two-part object", st_save3(OBJ_SETTINGS, s1, sizeof s1, s2, sizeof s2, s3, 0) == 0 &&
+                     st_load(OBJ_SETTINGS, got4, sizeof got4) == 1552);
+    }
     printf("%s\n", bad ? "STORAGE TEST FAILED" : "storage test passed");
     return bad != 0;
 }
