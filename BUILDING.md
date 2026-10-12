@@ -159,6 +159,11 @@ node web/test_installer.mjs
 python3 tests/site_test.py
 ```
 
+For the first Pages deployment, select **GitHub Actions** as the repository's
+Pages source. In the `github-pages` environment, retain the `main` branch rule
+and allow release tags matching `v*`: release-triggered runs use the tag ref,
+so a main-only environment rejects their deployment.
+
 `.github/workflows/pages.yml` runs after a published release or manual dispatch.
 It selects the latest published release, downloads `orbit.fwsc` and `SHA256SUMS`,
 checks the checksum, generates/tests the site, then uploads a Pages artifact.
