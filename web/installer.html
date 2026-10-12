@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments -->
+<!-- The ORBIT firmware installer for the FM-1 over Web MIDI. Tokens and layout follow DESIGN.md section 9;
+     the behaviour is in installer.js, the update protocol in fm1ota.js, the package checks in fm1pkg.js. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="Install ORBIT firmware on an FM-1 from the browser over USB MIDI.">
+<title>ORBIT firmware installer for the FM-1</title>
+<style>
+  :root {
+    --background: #000000; --surface: #111111; --text: #ffffff; --muted: #aaaaaa; --line: #444444;
+    --accent: #287cff; --success: #1ecc70; --warning: #ff621a;
+    --unit: 4px;
+    --font: system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --background: #f7f7f7; --surface: #ffffff; --text: #111111; --muted: #555555; --line: #cccccc;
+      --accent: #185ad8; --success: #127c43; --warning: #b83900;
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--background); }
+  body { margin: 0; background: var(--background); color: var(--text); font: 16px/24px var(--font); }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code, .mono { font-family: var(--mono); font-size: 14px; overflow-wrap: anywhere; }
+  [hidden] { display: none !important; }
+
+  .page { max-width: 720px; margin: 0 auto; padding: calc(6 * var(--unit)); }
+  @media (max-width: 480px) { .page { padding: calc(4 * var(--unit)); } }
+
+  .masthead { padding-bottom: calc(6 * var(--unit)); }
+  .wordmark { margin: 0; font-size: 32px; line-height: 1; font-weight: 100; letter-spacing: .1em; }
+  h1 { margin: calc(2 * var(--unit)) 0 0; font-size: 24px; line-height: 32px; font-weight: 400; }
+  .identity { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--unit); height: 2px; margin: calc(4 * var(--unit)) 0; }
+  .identity span:nth-child(1) { background: var(--accent); }
+  .identity span:nth-child(2) { background: var(--success); }
+  .identity span:nth-child(3) { background: var(--text); }
+  .identity span:nth-child(4) { background: var(--warning); }
+  .lead { margin: 0; }
+  .support { margin: calc(2 * var(--unit)) 0 0; font-size: 14px; line-height: 20px; color: var(--muted); }
+
+  .step { border-top: 1px solid var(--line); padding: calc(6 * var(--unit)) 0; }
+  h2 { display: flex; align-items: center; gap: calc(3 * var(--unit)); margin: 0 0 calc(3 * var(--unit)); font-size: 24px; line-height: 32px; font-weight: 400; }
+  .num { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--line); font-size: 16px; }
+  .num-1 { color: var(--accent); } .num-2 { color: var(--success); } .num-3 { color: var(--text); }
+  .step p { margin: 0 0 calc(4 * var(--unit)); }
+  h3 { margin: 0 0 calc(2 * var(--unit)); font-size: 16px; line-height: 24px; font-weight: 600; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: calc(3 * var(--unit)); align-items: center; margin-bottom: calc(4 * var(--unit)); }
+  button, .button {
+    display: inline-flex; align-items: center; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line);
+    border-radius: 0; min-height: 44px; padding: 0 calc(4 * var(--unit)); cursor: pointer; transition: background-color 120ms, border-color 120ms, color 120ms;
+  }
+  button:hover:not(:disabled), .button:hover:not(:has(input:disabled)) { border-color: var(--text); }
+  button:active:not(:disabled), .button:active:not(:has(input:disabled)) { background: var(--text); color: var(--background); border-color: var(--text); }
+  button:disabled, .button:has(input:disabled) { color: var(--muted); background: transparent; cursor: not-allowed; }
+  button[aria-busy=true] { color: var(--muted); border-color: var(--muted); }
+  .button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--unit) calc(4 * var(--unit)); margin: 0; }
+  .facts dt { color: var(--muted); font-size: 14px; line-height: 24px; }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  @media (max-width: 480px) { .facts { grid-template-columns: 1fr; } .facts dt { line-height: 20px; } .facts dd { margin-bottom: calc(2 * var(--unit)); } }
+
+  progress { display: block; width: 100%; height: 8px; margin: 0 0 calc(2 * var(--unit)); appearance: none; border: 1px solid var(--line); background: var(--surface); }
+  progress::-webkit-progress-bar { background: var(--surface); }
+  progress::-webkit-progress-value { background: var(--accent); }
+  progress::-moz-progress-bar { background: var(--accent); }
+  .status { margin: 0 0 calc(4 * var(--unit)); min-height: 24px; }
+
+  .features { list-style: none; padding: 0; margin: calc(6 * var(--unit)) 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(4 * var(--unit)); }
+  .features strong { display: block; margin-bottom: var(--unit); font-weight: 600; }
+  .features p { margin: 0; color: var(--muted); font-size: 14px; line-height: 20px; }
+  .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(4 * var(--unit)); margin-bottom: calc(8 * var(--unit)); }
+  .gallery figure { margin: 0; }
+  .gallery img { display: block; width: 100%; max-width: 240px; height: auto; image-rendering: pixelated; }
+  .gallery figcaption { margin-top: calc(2 * var(--unit)); font-size: 14px; line-height: 20px; color: var(--muted); }
+  .install-intro { border-top: 1px solid var(--line); padding-top: calc(6 * var(--unit)); }
+  .step h3 { display: flex; align-items: center; gap: calc(3 * var(--unit)); font-size: 24px; line-height: 28px; font-weight: 500; }
+  @media (max-width: 640px) {
+    .features, .gallery { grid-template-columns: minmax(0, 1fr); }
+    .gallery figure { width: 240px; max-width: 100%; justify-self: center; }
+  }
+
+  .alert { border: 1px solid var(--line); background: var(--surface); padding: calc(3 * var(--unit)) calc(4 * var(--unit)); margin: 0 0 calc(4 * var(--unit)); }
+  .alert p { margin: 0; }
+  .alert p + p { margin-top: var(--unit); }
+  .alert-title { color: var(--warning); font-weight: 600; }
+  .alert .mono { color: var(--muted); }
+
+  .notice { border: 1px solid var(--line); padding: calc(3 * var(--unit)) calc(4 * var(--unit)); }
+  .notice ul { margin: 0; padding-left: calc(5 * var(--unit)); }
+  .notice li + li { margin-top: var(--unit); }
+
+  footer { border-top: 1px solid var(--line); padding-top: calc(4 * var(--unit)); font-size: 14px; line-height: 20px; color: var(--muted); }
+  footer p { margin: 0; }
+
+  @media (prefers-reduced-motion: reduce) { button, .button { transition: none; } }
+</style>
+</head>
+<body data-manifest="manifest.json">
+<main class="page">
+  <header class="masthead">
+    <p class="wordmark">Orbit</p>
+    <h1>Four tracks. Hands-on sound.</h1>
+    <div class="identity" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <p class="lead">ORBIT turns your FM-1 into a four-track groovebox. Layer synth parts and drums, shape the sound with four knobs, and build a performance from your patterns.</p>
+    <p><a href="#installation">Install the latest release</a> &middot; <a href="https://github.com/dspaudio/orbit/blob/main/GUIDE.md">Explore the guide</a></p>
+    <ul class="features">
+      <li><strong>Shape the sound</strong><p>Engine, envelope, FX and LFO editing, with colour-coded knobs and saved user macros.</p></li>
+      <li><strong>Find your sound</strong><p>Synthesis, sampling and granular textures, with an instant preset list and your own saved sounds.</p></li>
+      <li><strong>Build a performance</strong><p>Three synth tracks plus drums, parameter locks, Event Tape editing and live punch-in effects.</p></li>
+    </ul>
+  </header>
+
+  <section class="gallery" aria-label="Native FM-1 firmware screenshots">
+    <figure><img src="screens/envelope.svg" width="240" height="240" alt="FM-1 envelope screen with attack, decay, sustain and release controls"><figcaption>Shape each note with the envelope.</figcaption></figure>
+    <figure><img src="screens/preset.svg" width="240" height="240" alt="FM-1 preset browser showing nearby sound names and the selected sound"><figcaption>Turn PRESETS to see and audition sounds.</figcaption></figure>
+    <figure><img src="screens/tape.svg" width="240" height="240" alt="FM-1 Event Tape with four sequencer timelines and the current play position"><figcaption>Arrange note events on the four-track Tape.</figcaption></figure>
+  </section>
+
+  <section id="installation" aria-labelledby="h-installation">
+  <header class="install-intro">
+    <h2 id="h-installation">Install ORBIT</h2>
+    <p>The latest release downloads and is checked automatically. Connect your FM-1, then press Install.</p>
+    <p class="support">Use a Chromium-based desktop browser with Web MIDI (Chrome, Edge, Brave) and a USB data cable.</p>
+  </header>
+  <section class="step" aria-labelledby="h-package">
+    <h3 id="h-package"><span class="num num-1" aria-hidden="true">1</span>Latest firmware</h3>
+    <p>The release checksum, device identity, update loader and file CRCs are checked before installation.</p>
+    <div class="controls">
+      <button id="release" type="button" hidden disabled>Retry download</button>
+    </div>
+    <p id="releaseNote" class="support">Loading the latest release&hellip;</p>
+    <dl class="facts">
+      <dt>Source</dt><dd id="pkgSource">&mdash;</dd>
+      <dt>Identity</dt><dd id="pkgProduct" class="mono">&mdash;</dd>
+      <dt>Size</dt><dd id="pkgSize">&mdash;</dd>
+      <dt>SHA-256</dt><dd id="pkgSha" class="mono">&mdash;</dd>
+    </dl>
+  </section>
+
+  <section class="step" aria-labelledby="h-connect">
+    <h3 id="h-connect"><span class="num num-2" aria-hidden="true">2</span>Connect</h3>
+    <p>Plug the FM-1 in with a USB data cable and close other apps that use its MIDI port. Connect asks the browser for MIDI access with SysEx, then reads the device identity. No firmware data is sent in this step.</p>
+    <div class="controls"><button id="connect" type="button">Connect</button></div>
+    <dl class="facts">
+      <dt>Device</dt><dd id="device" class="mono">Not connected</dd>
+    </dl>
+  </section>
+
+  <section class="step" aria-labelledby="h-install">
+    <h3 id="h-install"><span class="num num-3" aria-hidden="true">3</span>Install</h3>
+    <p>Install opens once the package is valid and the connected device matches it. The running firmware stages the update loader first, then the loader writes the whole image and the FM-1 restarts on its own. Success is reported only when the device comes back with the package identity.</p>
+    <div class="controls"><button id="install" type="button" disabled>Install</button></div>
+    <progress id="progress" max="100" aria-labelledby="h-install" hidden></progress>
+    <p id="status" class="status" role="status" aria-live="polite">Waiting for a package and a device.</p>
+    <div id="error" class="alert" role="alert" hidden>
+      <p id="errorTitle" class="alert-title"></p>
+      <p id="errorDetail" class="mono"></p>
+      <p id="errorRecovery"></p>
+    </div>
+    <div class="notice">
+      <h3>During the write</h3>
+      <ul>
+        <li>Keep the FM-1 connected and powered, and keep this page open until it reports the installed identity.</li>
+        <li>The device restarts twice: into the update loader, then into the new firmware.</li>
+        <li>If the connection drops, press Connect and then Install again: a device left in update mode resumes the write.</li>
+        <li>If the FM-1 no longer starts, recovery needs <a href="https://github.com/kurogedelic/FM-1-transporter">FM-1-transporter</a>; this page cannot recover every failure.</li>
+      </ul>
+    </div>
+  </section>
+
+  </section>
+  <footer>
+    <p><a href="editor.html">Sound editor</a> &middot; <a href="https://github.com/dspaudio/orbit">Source and releases</a> &middot; GPL-3.0-only</p>
+  </footer>
+</main>
+<script type="module">
+  import { mount } from "./installer.js";
+  mount(document);
+</script>
+</body>
+</html>

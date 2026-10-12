@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Publish the ORBIT web installer to GitHub Pages from a published release. The release's own
+# orbit.fwsc and SHA256SUMS are downloaded and verified, tools/make_site.py generates the site
+# with that package under firmware/orbit-<version>.fwsc, the focused tests run, and the
+# artifact is deployed with the GitHub Pages actions. The repository's Pages source must be
+# set to "GitHub Actions" once; no binary is ever committed to the source tree.
+name: pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the release package and verify its checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          printf 'TAG=%s\n' "$TAG" >> "$GITHUB_ENV"
+          mkdir release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern orbit.fwsc --pattern SHA256SUMS
+          cd release
+          sha256sum --check --strict --ignore-missing SHA256SUMS
+          sha256sum orbit.fwsc
+
+      - name: Generate the site
+        run: |
+          set -euo pipefail
+          python3 tools/make_site.py --package release/orbit.fwsc --version "${TAG#v}" --out build/site \
+            --release-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          cat build/site/manifest.json
+
+      - name: Check the installer and the generated site
+        run: |
+          set -euo pipefail
+          node web/test_installer.mjs
+          python3 tests/site_test.py
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
