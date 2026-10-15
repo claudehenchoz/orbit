@@ -149,6 +149,144 @@ static void check_battery(uint32_t bars, uint16_t color)
               "battery bars match current power state without a forced redraw");
 }
 
+static int pattern_equal(const track_t *a, const track_t *b)
+{
+    return a->p[P_SLEN]==b->p[P_SLEN] && !memcmp(a->step,b->step,sizeof a->step) &&
+           !memcmp(a->micro,b->micro,sizeof a->micro) && !memcmp(a->fill,b->fill,sizeof a->fill) &&
+           !memcmp(a->lock,b->lock,sizeof a->lock);
+}
+
+static void tape_pattern_tests(void)
+{
+    uint32_t track, n, i, k;
+    for(track=1;track<NTRK;track+=NPART-1u) {
+        track_t *t=&trk[track], saved=*t, before, expected, after;
+        for(n=1;n<=32;n=n==1?3:32) {
+            locks_clear(t); memset(t->fill,0,sizeof t->fill); t->p[P_SLEN]=(int16_t)n;
+            for(i=0;i<NSTEP;i++) {
+                t->step[i]=(step_t){.note={(uint8_t)(40+i)},.n=1,.time=ST_NOTE,.vel=(uint8_t)(64+i)};
+                t->micro[i]=(int8_t)(i%32-16); step_fill_set(t,i,i%3);
+            }
+            lock_set(t,0,P_TFLT,22); lock_set(t,n-1,P_PAN,17);
+            if(n*2<NSTEP) lock_set(t,n*2,P_TFLT,31);
+            before=*t;
+            ui.step_sess=0; pattern_rotate(t,2);
+            expected=before;
+            for(i=0;i<n;i++) {
+                k=(i+2)%n; expected.step[k]=before.step[i]; expected.micro[k]=before.micro[i];
+                step_fill_set(&expected,k,step_fill(&before,i));
+            }
+            for(i=0;i<NLOCK;i++) if(expected.lock[i].step<n) expected.lock[i].step=(uint8_t)((expected.lock[i].step+2)%n);
+            check(pattern_equal(t,&expected),"positive rotation moves active events and metadata only");
+            if(n>1) check(undo_swap(0) && pattern_equal(t,&before) && undo_swap(1) && pattern_equal(t,&expected),
+                          "rotation Undo/Redo restores the whole pattern");
+            *t=before; t->p[P_TFLT]=7; lock_step(t,0);
+            ui.step_sess=0; pattern_rotate(t,-2);
+            expected=before;
+            for(i=0;i<n;i++) {
+                k=(i+n-2%n)%n; expected.step[k]=before.step[i]; expected.micro[k]=before.micro[i];
+                step_fill_set(&expected,k,step_fill(&before,i));
+            }
+            for(i=0;i<NLOCK;i++) if(expected.lock[i].step<n) expected.lock[i].step=(uint8_t)((expected.lock[i].step+n-2%n)%n);
+            check(pattern_equal(t,&expected) && (n==1 || (!t->lk_n && t->p[P_TFLT]==7)),
+                  "negative rotation preserves inactive metadata and restores lock base");
+            locks_restore(t);
+            undo_mark(t,(undo_sess+=4u)|3u); t->step[0].vel=99;
+            {
+                __typeof__(undo) previous=undo;
+                uint32_t sess=undo_sess;
+                before=*t; ui.step_sess=0;
+                pattern_rotate(t,0); pattern_rotate(t,(int32_t)n); pattern_rotate(t,-(int32_t)n);
+                check(!memcmp(&previous,&undo,sizeof undo) && undo_sess==sess && pattern_equal(t,&before),
+                      "zero and modulo rotations retain previous Undo");
+                if(n==1) {
+                    pattern_rotate(t,-1); pattern_length(t,-1);
+                    check(!memcmp(&previous,&undo,sizeof undo) && pattern_equal(t,&before),
+                          "length-one rotation and halving retain previous Undo");
+                }
+            }
+            before=*t; expected=before;
+            ui.step_sess=0; pattern_length(t,1);
+            expected.p[P_SLEN]=(int16_t)(n*2);
+            for(i=0;i<n;i++) {
+                expected.step[n+i]=before.step[i]; expected.micro[n+i]=before.micro[i];
+                step_fill_set(&expected,n+i,step_fill(&before,i));
+            }
+            check(t->p[P_SLEN]==(int16_t)(n*2) && !memcmp(t->step,expected.step,sizeof t->step) &&
+                  !memcmp(t->micro,expected.micro,sizeof t->micro) && !memcmp(t->fill,expected.fill,sizeof t->fill),
+                  "length x2 copies events, micro and packed fill at lengths 1, 3, 32");
+            for(i=0;i<NLOCK;i++) if(before.lock[i].step<n) {
+                k=(uint32_t)lock_find(t,n+before.lock[i].step,before.lock[i].param,0);
+                check(k<NLOCK && t->lock[k].val==before.lock[i].val,"length x2 duplicates source parameter locks");
+            }
+            after=*t;
+            check(undo_swap(0) && pattern_equal(t,&before) && undo_swap(1) && pattern_equal(t,&after),
+                  "length x2 is covered by one Undo/Redo snapshot");
+            if(n==32) {
+                __typeof__(undo) previous=undo;
+                ui.step_sess=0; pattern_length(t,1); pattern_length(t,0);
+                check(pattern_equal(t,&after) && !memcmp(&previous,&undo,sizeof undo),
+                      "length 64 doubling and zero length shift retain previous Undo");
+                break;
+            }
+        }
+        locks_clear(t); t->p[P_SLEN]=3;
+        t->lock[0]=(plock_t){.step=0,.param=P_TFLT,.val=22};
+        t->lock[1]=(plock_t){.step=3,.param=P_PAN,.val=17};
+        for(i=2;i<NLOCK;i++) t->lock[i]=(plock_t){.step=(uint8_t)(6+(i-2)/8),.param=(uint8_t)(P_E0+(i-2)%8),.val=1};
+        before=*t; ui.step_sess=0; t->p[P_TFLT]=7; lock_step(t,0); pattern_length(t,1);
+        check(t->p[P_SLEN]==6 && !t->lk_n && t->p[P_TFLT]==7 &&
+              lock_find(t,3,P_PAN,0)<0 && lock_find(t,3,P_TFLT,0)>=0 &&
+              !memcmp(t->lock+2,before.lock+2,(NLOCK-2)*sizeof(plock_t)),
+              "full lock table x2 replaces destination locks and retains outside locks");
+        check(undo_swap(0) && pattern_equal(t,&before),"capacity replacement Undo restores overwritten locks");
+        t->lock[1].step=4; before=*t; ui.step_sess=0; pattern_length(t,1);
+        check(t->p[P_SLEN]==6 && lock_find(t,4,P_PAN,0)<0 && lock_find(t,3,P_TFLT,0)>=0,
+              "x2 removes all destination locks, including empty source positions");
+        *t=before; t->lock[1].step=8;
+        undo_mark(t,(undo_sess+=4u)|3u); t->step[0].vel=101; t->p[P_TFLT]=7; lock_step(t,0);
+        before=*t;
+        {
+            __typeof__(undo) previous=undo;
+            uint32_t sess=undo_sess;
+            ui.step_sess=0; pattern_length(t,1);
+            check(!memcmp(t,&before,sizeof *t) && !memcmp(&previous,&undo,sizeof undo) && undo_sess==sess,
+                  "x2 overflow rejects length, events, metadata and active base without losing Undo");
+            check(undo_swap(0) && t->step[0].vel==previous.st[0].vel,"x2 overflow leaves previous Undo usable");
+        }
+        locks_clear(t); t->p[P_SLEN]=16; t->p[P_TFLT]=7;
+        t->step[0]=(step_t){.note={60},.n=1,.time=ST_NOTE,.vel=100};
+        if(is_drum(t)) { memset(&t->dstep[0],0,sizeof(dstep_t)); dstep_set(&t->dstep[0],15,LV_HARD,3); }
+        t->micro[0]=-12; step_fill_set(t,0,FC_FILL); lock_set(t,0,P_TFLT,22);
+        t->step[4]=(step_t){.note={62},.n=1,.time=ST_NOTE,.vel=80};
+        t->micro[4]=9; step_fill_set(t,4,FC_NOFILL); lock_set(t,4,P_PAN,17);
+        orbit_capture(track,0,0,0); t->p[P_PAN]=7; lock_step(t,4); before=*t;
+        check(orbit_drop(track,4)==1 && !t->lk_n && t->p[P_PAN]==7 && t->micro[4]==-12 &&
+              step_fill(t,4)==FC_FILL && lock_find(t,4,P_TFLT,0)>=0 && lock_find(t,4,P_PAN,0)<0 &&
+              !memcmp(&t->step[4],&t->step[0],sizeof(step_t)),"note/drum DROP replaces destination events and metadata");
+        after=*t;
+        check(undo_swap(0) && pattern_equal(t,&before),"note/drum DROP Undo restores destination");
+        lock_step(t,4);
+        check(undo_swap(1) && pattern_equal(t,&after) && !t->lk_n && t->p[P_PAN]==7,
+              "note/drum DROP Redo restores dropped events, metadata and active base");
+        locks_clear(t);
+        for(i=0;i<NLOCK;i++) t->lock[i]=(plock_t){.step=(uint8_t)(8+i/8),.param=(uint8_t)(P_E0+i%8),.val=1};
+        undo_mark(t,(undo_sess+=4u)|3u); t->step[4].vel=102; lock_step(t,8); before=*t;
+        {
+            __typeof__(undo) previous=undo;
+            uint32_t sess=undo_sess, revision=orbit_tape.revision;
+            check(!orbit_drop(track,4) && !orbit_drop(NTRK,0) && !orbit_drop(track,16) &&
+                  !orbit_drop(is_drum(t)?0:NPART,0),"DROP rejects capacity, track, boundary and type failures");
+            orbit_tape.count=0; check(!orbit_drop(track,0),"DROP rejects empty clipboard"); orbit_tape.count=1;
+            check(!memcmp(t,&before,sizeof *t) && !memcmp(&previous,&undo,sizeof undo) &&
+                  undo_sess==sess && orbit_tape.revision==revision,"failed DROP preserves active base, destination and previous Undo");
+            check(undo_swap(0) && t->step[4].vel==previous.st[4].vel,"failed DROP leaves previous Undo usable");
+        }
+        *t=saved;
+    }
+    undo.valid=0; ui.step_sess=0;
+}
+
 int main(int argc, char **argv)
 {
     uint32_t i;
@@ -187,6 +325,7 @@ int main(int argc, char **argv)
     check(orbit_capture(NPART,0,0,0) && orbit_drop(NPART,2)==1,"drum clipboard copy/drop");
     check(TDRUM->dstep[2].on[1]==128 && TDRUM->dstep[2].rat[3]==192,"drum lane 16 / ratchet bits preserved");
     check(!orbit_drop(0,0),"reject drum clipboard on synth track");
+    tape_pattern_tests();
     bank_resolve();
     { uint32_t matched=0; for(i=0;i<NBANK;i++) matched+=bank_pi[i]!=0xFF;
       check(matched==NBANK,"all preset bank names resolve to real engine presets"); }
@@ -257,9 +396,36 @@ int main(int argc, char **argv)
     tap(B_PLAY); frame(); check(!song.playing,"Tape PLAY stops transport");
     encs[panel.enc[EN_K1]]=5; frame(); check(orbit_tape.cursor==5,"Tape knob moves head");
     encs[panel.enc[EN_K1+3]]=1; frame(); check(orbit_tape.lift==1,"Tape knob chooses lift");
-    orbit_tape.first=8; orbit_tape.last=11; tap(B_OCTDN);
-    check(orbit_tape.count==4 && trk[0].step[8].time==ST_REST,"OCT- lift goes through panel input");
-    orbit_tape.cursor=0; tap(B_OCTUP); check(trk[0].step[0].n==3,"OCT+ drops via panel input");
+    /* Plain OCT-/OCT+ on Tape change the octave (both: reset) and leave the events and the clipboard alone. */
+    {
+        step_t original[NSTEP]; plock_t locks[NLOCK]; uint32_t revision=orbit_tape.revision, count=orbit_tape.count;
+        memcpy(original,trk[0].step,sizeof original); memcpy(locks,trk[0].lock,sizeof locks);
+        song.octave=0;
+        tap(B_OCTDN); check(ui.home && !vis_shown() && song.octave==-1,"Tape OCT- lowers octave");
+        tap(B_OCTUP); tap(B_OCTUP); check(song.octave==1,"Tape OCT+ raises octave");
+        press(B_OCTDN); press(B_OCTUP); release(B_OCTUP); release(B_OCTDN);
+        check(song.octave==0,"Tape OCT- then OCT+ held together resets octave");
+        tap(B_OCTUP); press(B_OCTUP); press(B_OCTDN); release(B_OCTDN); release(B_OCTUP);
+        check(song.octave==0,"Tape OCT+ then OCT- held together resets octave");
+        check(orbit_tape.revision==revision && orbit_tape.count==count && !memcmp(original,trk[0].step,sizeof original) &&
+              !memcmp(locks,trk[0].lock,sizeof locks),"plain OCT on Tape leaves events and clipboard");
+    }
+    /* SEL + OCT-/OCT+ carry the Tape actions; SEL let go is not a tap (no SEL page). */
+    orbit_tape.first=8; orbit_tape.last=11; press(B_SCL); tap(B_OCTDN); release(B_SCL);
+    check(orbit_tape.count==4 && trk[0].step[8].time==ST_REST && song.octave==0,"SEL+OCT- lift goes through panel input");
+    check(ui.home && ui.layer==LY_PLAY && cur_fam()!=FAM_SCL,"SEL+OCT- leaves no stray SEL tap");
+    orbit_tape.cursor=0; press(B_SCL); tap(B_OCTUP); release(B_SCL);
+    check(trk[0].step[0].n==3 && song.octave==0 && ui.home,"SEL+OCT+ drops via panel input");
+    {
+        uint32_t revision;
+        orbit_tape.lift=0;
+        press(B_SCL); press(B_OCTDN); release(B_SCL); release(B_OCTDN);
+        revision=orbit_tape.revision;
+        edges_btn |= BT(B_SCL) | BT(B_OCTDN);
+        fm1_in.buttons |= BT(B_SCL) | BT(B_OCTDN);
+        frame(); release(B_SCL); release(B_OCTDN);
+        check(orbit_tape.revision==revision+1u,"SEL released first: the next simultaneous SEL+OCT- captures");
+    }
     /* LIFT와 Undo/Redo가 스텝 메타데이터와 활성 lock의 원래 값을 보존한다. */
     trk[0].micro[1]=-12; step_fill_set(&trk[0],1,FC_FILL);
     lock_set(&trk[0],1,P_TFLT,22);
@@ -267,7 +433,7 @@ int main(int argc, char **argv)
         step_t original[NSTEP]; int8_t micro[NSTEP]; uint8_t fill[NSTEP/4]; plock_t locks[NLOCK];
         memcpy(original,trk[0].step,sizeof original); memcpy(micro,trk[0].micro,sizeof micro);
         memcpy(fill,trk[0].fill,sizeof fill); memcpy(locks,trk[0].lock,sizeof locks);
-        orbit_tape.first=0; orbit_tape.last=3; orbit_tape.lift=1; tap(B_OCTDN);
+        orbit_tape.first=0; orbit_tape.last=3; orbit_tape.lift=1; press(B_SCL); tap(B_OCTDN); release(B_SCL);
         check(undo_swap(0) && !memcmp(original,trk[0].step,sizeof original) &&
               !memcmp(micro,trk[0].micro,sizeof micro) && !memcmp(fill,trk[0].fill,sizeof fill) &&
               !memcmp(locks,trk[0].lock,sizeof locks),"LIFT Undo restores notes, micro, fill and lock table");
@@ -291,6 +457,14 @@ int main(int argc, char **argv)
         check(song.octave==octave,"Visualizer OCT buttons retain octave controls");
     }
     tap(B_HOME);
+    open_family(FAM_ENV); frames(2);
+    {
+        uint32_t revision=orbit_tape.revision; int octave=song.octave;
+        press(B_SCL); tap(B_OCTDN); tap(B_OCTUP); release(B_SCL);
+        check(orbit_tape.revision==revision && song.octave==octave && cur_fam()==FAM_ENV,
+              "SEL+OCT off Tape: no Tape action, no octave, no SEL tap");
+    }
+    go_home(); frames(16);                /* (KNOB 1..4 quiet ~250 ms after a layer: #39) */
     ui.msg_t=0; frame(); ppm("orbit-edited");
     open_family(FAM_EDIT); frame(); ppm("orbit-synth");
     /* 오리지널 OP-1의 네 모듈 T1 engine / T2 envelope / T3 effect / T4 LFO와 FM-1 키 EDIT / ENV / FX / LFO: 헤더 둘째 줄에서

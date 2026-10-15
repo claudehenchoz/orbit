@@ -22,7 +22,7 @@ static void orbit_edit(int drop)
     } else {
         if (orbit_tape.lift && !is_drum(TSEL)) undo_mark(TSEL, (undo_sess += 4u) | 3u);
         orbit_capture(song.sel, orbit_tape.first, orbit_tape.last, orbit_tape.lift);
-        ui_message(orbit_tape.lift ? "LIFTED: OCT+ DROP" : "COPIED: OCT+ DROP");
+        ui_message(orbit_tape.lift ? "LIFTED" : "COPIED");
     }
     sync_reload = 1;
     ui.pl_t = 0;
@@ -90,21 +90,24 @@ static void orbit_screen_draw(void)
         if(song.rec) te_disc(120,38,7,TE_RED); else te_play_icon(114,30,song.playing);
     }
     cv_blit(0,24);
-    cv_begin(240,76,C_BLACK);
+    cv_begin(240,60,C_BLACK);
     for(i=0;i<NTRK;i++) {
-        int32_t y=(int32_t)i*19;
-        if(i==song.sel) cv_rect(0,y,240,18,TE_G1);
-        fmt_int(b,(int32_t)i+1); cv_text(6,y+1,&FONT_S,b,TE_COL[i]);
+        int32_t y=(int32_t)i*15;
+        if(i==song.sel) cv_rect(0,y,240,14,TE_G1);
+        fmt_int(b,(int32_t)i+1); cv_text(6,y-1,&FONT_S,b,TE_COL[i]);
         for(j=0;j<NSTEP;j++) {
             int32_t x=30+(int32_t)j*3;
-            if(i==song.sel && j>=orbit_tape.first && j<=orbit_tape.last) cv_rect(x,y+1,3,16,TE_DIM[i]);
-            if(j<trk_len(&trk[i])) cv_rect(x,y+8,1,2,TE_G2);
-            if(j<trk_len(&trk[i]) && trk_step_on(&trk[i],j)) cv_rect(x,y+4,3,10,trk[i].p[P_MUTE]?TE_DIM[i]:TE_COL[i]);
-            if(song.playing && j==trk[i].seq_idx) cv_line(x,y+1,x,y+16,C_WHITE);
-            if(i==song.sel && j==orbit_tape.cursor) cv_rect(x,y+15,3,2,TE_COL[2]);
+            if(i==song.sel && j>=orbit_tape.first && j<=orbit_tape.last) cv_rect(x,y+1,3,12,TE_DIM[i]);
+            if(j<trk_len(&trk[i])) cv_rect(x,y+6,1,2,TE_G2);
+            if(j<trk_len(&trk[i]) && trk_step_on(&trk[i],j)) cv_rect(x,y+3,3,8,trk[i].p[P_MUTE]?TE_DIM[i]:TE_COL[i]);
+            if(song.playing && j==trk[i].seq_idx) cv_line(x,y+1,x,y+12,C_WHITE);
+            if(i==song.sel && j==orbit_tape.cursor) cv_rect(x,y+11,3,2,TE_COL[2]);
         }
     }
     cv_blit(0,120);
+    cv_begin(240,16,C_BLACK);
+    cv_text(8,0,&FONT_S,orbit_tape.lift ? "SEL+OCT- LIFT  SEL+OCT+ DROP" : "SEL+OCT- COPY  SEL+OCT+ DROP",TE_G4);
+    cv_blit(0,180);
     }
     cv_begin(240,44,C_BLACK);
     if(ui.msg_t) cv_text(4,14,&FONT_S,ui.msg,C_WHITE);

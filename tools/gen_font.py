@@ -9,8 +9,9 @@ Terminus 8x16 (BDF, SIL OFL 1.1). TTF fonts also work through render()
 
 Glyph format: per glyph an advance width, a bitmap width and an offset; the
 bitmap starts FONT_PAD pixels left of the pen position (room for side
-bearings); rows top to bottom, 2 pixels per byte (high nibble first),
-alpha 0..15.
+bearings); binary alpha uses packed bits, most significant first, with
+continuous rows. Anti-aliased alpha uses 2 pixels per byte (high nibble
+first), alpha 0..15. Identical glyph bitmaps share storage.
 """
 import sys
 from pathlib import Path
@@ -126,7 +127,7 @@ def main(out):
         if scale > 1 and pixel and base is not None:
             # SLOOP 2.4: a pixel font at 2x is the 1x font's own bitmaps, enlarged while drawing (gfx.c
             # cv_text): no second copy in flash (24 KB). Same glyphs, same pixels: checked here.
-            bname, bfirst, bh, bglyphs = base
+            bname, bfirst, bh, bglyphs, bpp = base
             assert scale == 2 and first == bfirst and h == bh * 2, "L must be S at 2x, same first glyph"
             for (adv, bw, g), (badv, bbw, bg) in zip(glyphs, bglyphs):
                 assert adv == badv * 2 and bw == bbw * 2 and g == upscale(bg, bbw, bh, 2)
@@ -134,19 +135,31 @@ def main(out):
                          ", ".join(str(a) for a, _, _ in glyphs) + "};")
             lines.append(f"static const uint8_t FONT_{name}_BW[{len(glyphs)}] = {{" +
                          ", ".join(str(b) for _, b, _ in glyphs) + "};")
-            lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, 1, "
+            lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, 1, {bpp}, "
                          f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{bname}_OFF, FONT_{bname}_DATA }};")
             lines.append("")
             print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, "
                   f"the {bname} bitmaps at {scale}x (0 B)")
             continue
+        bpp = 1 if all(v in (0, 15) for _, _, g in glyphs for v in g) else 4
         data, offs = [], []
+        seen: dict[bytes, int] = {}
         for adv, bw, g in glyphs:
-            offs.append(len(data))
-            for y in range(h):
-                row = g[y * bw:(y + 1) * bw] + [0]
-                for x in range(0, bw, 2):
-                    data.append((row[x] << 4) | row[x + 1])
+            blob = bytearray()
+            if bpp == 1:
+                for i in range(0, len(g), 8):
+                    blob.append(sum((v // 15) << (7 - bit) for bit, v in enumerate(g[i:i + 8])))
+                assert [15 * ((blob[i // 8] >> (7 - i % 8)) & 1) for i in range(len(g))] == g
+            else:
+                for y in range(h):
+                    row = g[y * bw:(y + 1) * bw] + [0]
+                    for x in range(0, bw, 2):
+                        blob.append((row[x] << 4) | row[x + 1])
+            packed = bytes(blob)
+            if packed not in seen:
+                seen[packed] = len(data)
+                data.extend(packed)
+            offs.append(seen[packed])
         assert len(data) < 65536
         lines.append(f"static const uint8_t FONT_{name}_DATA[{len(data)}] = {{")
         for i in range(0, len(data), 24):
@@ -157,12 +170,12 @@ def main(out):
                      ", ".join(str(a) for a, _, _ in glyphs) + "};")
         lines.append(f"static const uint8_t FONT_{name}_BW[{len(glyphs)}] = {{" +
                      ", ".join(str(b) for _, b, _ in glyphs) + "};")
-        lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, 0, "
+        lines.append(f"static const felucca_font_t FONT_{name} = {{ {h}, {PAD * scale}, {first}, {last}, 0, {bpp}, "
                      f"FONT_{name}_ADV, FONT_{name}_BW, FONT_{name}_OFF, FONT_{name}_DATA }};")
         lines.append("")
         if scale == 1:
-            base = (name, first, h, glyphs)
-        print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, {len(data)} B")
+            base = (name, first, h, glyphs, bpp)
+        print(f"font {name}: {ttf} {px}px h {h}, digit adv {glyphs[ord('0') - first][0]}, {len(data)} B ({bpp} bpp)")
     Path(out).write_text("\n".join(lines))
 
 

@@ -47,7 +47,8 @@ static void orbit_sound_draw(void)
     cache=sig;
     cv_begin(240,36,C_BLACK);
     str_cpy(title,pg->scope==SC_ENGINE ? engine->name : pg->fam==FAM_LFO ?
-            (pg->id[0]==P_LSYNC ? "LFO SYNC 2/3" : pg->graph==GR_LFO ? "LFO SOURCE 1/3" : "LFO DEST 3/3") : pg->title,sizeof title);
+            (pg->id[0]==P_LSYNC ? "LFO SYNC 2/3" : pg->graph==GR_LFO ? "LFO SOURCE 1/3" : "LFO DEST 3/3") :
+            pg->graph==GR_FX ? "FX TRACK" : pg->title,sizeof title);
     cv_text(8,2,&FONT_S,title,C_WHITE);
     fmt_int(small,song.sel+1); cv_text(198,2,&FONT_S,small,TE_COL[song.sel]);
     draw_battery(0);
@@ -129,12 +130,12 @@ static void orbit_mixer_draw(void)
     char b[16],hint[32];
     for(k=0;k<NTRK;k++) sig=sig*31u+trk[k].p[P_LEVEL]+trk[k].p[P_MUTE]*521u+trk[k].p[P_PAN]*17u+trk[k].eng_req*97u;
     sig=sig*31u+song.g[G_DRLVL];
-    sig=sig*31u+(uint32_t)batt_shown();
+    sig=(sig*31u+(uint32_t)batt_shown())*2u+(song.rec!=0u);
     if(pl_shown()) { uint32_t total; sig=sig*31u+preset_pos(&total)+1u+TSEL->user*257u+up_gen*7919u; }
     if(ui.force || sig!=cache) {
         cache=sig;
         cv_begin(240,36,C_BLACK);
-        cv_text(8,2,&FONT_S,"mixer",C_WHITE); fmt_int(b,song.g[G_BPM]); cv_text(178,2,&FONT_S,b,TE_G3);
+        cv_text(8,2,&FONT_S,song.rec?"REC / NO AUTO":"mixer",C_WHITE); fmt_int(b,song.g[G_BPM]); cv_text(178,2,&FONT_S,b,TE_G3);
         draw_battery(0);
         if(kind==MX_TRACK) {                        /* 둘째 줄: 이 페이지의 네 knob과 SELECT가 가는 곧 */
             str_cpy(hint,"track ",sizeof hint); fmt_int(hint+6,(int32_t)song.sel+1);

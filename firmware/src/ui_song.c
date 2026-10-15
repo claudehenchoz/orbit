@@ -55,7 +55,7 @@ static void song_screen_draw(void)
             cv_rect(30, 3, 22, 20, used ? sc : RGB(26, 26, 30));   /* the section tile */
             b[0] = (char)('A' + e->scene); b[1] = 0;
             cv_text(37, 5, &FONT_S, b, used ? C_BLACK : sc);
-            w = e->bars * 120 / 64 + 4;                 /* its length as a bar */
+            w = e->bars * 92 / 64 + 4;                  /* reserve the label and playing marker, even at 64 bars */
             cv_rect(60, 9, w, 8, used ? (selected ? sc : RGB(54, 54, 60)) : RGB(26, 26, 30));
             fmt_int(b, e->bars);
             str_cpy(b + str_len(b), e->bars == 1 ? " bar" : " bars", 8);

@@ -119,6 +119,13 @@ static void check(int ok, const char *what) { printf("ui: %-74s %s\n", what, ok 
 static const char *sub_line(void) { return layer_sub_shown; }   /* the layer's sub line as last drawn (ui_layers.c) */
 
 #ifndef UI_PAGES_HARNESS_ONLY                       /* (tests/stress_test.c: the harness, its own main) */
+static uint32_t lock_count(const track_t *t)        /* the lock slots in use */
+{
+    uint32_t k, n = 0;
+    for (k = 0; k < NLOCK; k++)
+        n += t->lock[k].step != LOCK_FREE;
+    return n;
+}
 int main(int argc, char **argv)
 {
     uint32_t i;
@@ -711,6 +718,10 @@ int main(int argc, char **argv)
         encs[panel.enc[EN_SELECT]] = 5; frame();
         sec = mi_sec(ui.menu_sel);
         check(sec == MS_SYSTEM, "menu: SELECT stops at the last section, SYSTEM");
+        encs[panel.enc[EN_K4]] = 1; ui.force = 1; frame(); ppm("menu-system");
+        check(ui.menu_sel == MI_DEMO && swap16(screen[193u * 240u + 4u]) == C_WHITE &&
+              swap16(screen[233u * 240u + 4u]) == C_BLACK,
+              "menu SYSTEM: fourth row selection fits above the screen edge without footer overlap");
         encs[panel.enc[EN_K2]] = 1; frame();
         check(ui.menu == 1 && ui.menu_sel == MI_LCLEAR, "menu SYSTEM: KNOB 2 is MIDI LEARN CLEAR (2.6), nothing cleared by a turn");
         encs[panel.enc[EN_K3]] = 1; frame();
@@ -864,12 +875,123 @@ int main(int argc, char **argv)
         check((keys_lit() >> key_of_white(2)) & 1u, "grid: its key lit");
         key(key_of_white(2));
         check(!dstep_mask(&TDRUM->dstep[2]), "grid: the key again clears it");
-        key(3);                                                     /* (G#3: the second black key) */
-        check(drum_cursor / 16u == 1u, "grid: the black keys pick the page of steps (17-32)");
+        tap(B_OCTUP);
+        check(drum_cursor == 18, "grid: OCT+ picks the next bank, keeping the local cursor");
         key(key_of_white(0));
         check(dstep_has(&TDRUM->dstep[16], 0), "grid: ... and the white keys are its steps (step 17)");
-        key(8);                                                     /* (C#4: the fourth: steps 49-64, none) */
-        check(drum_cursor / 16u == 1u, "grid: a page past LENGTH is not picked");
+        tap(B_OCTUP);
+        check(drum_cursor == 0, "grid: OCT+ wraps at LENGTH, as in the SEQ layer");
+        tap(B_OCTDN);
+        check(drum_cursor == 16, "grid: OCT- wraps back to the last bank");
+        {   /* All black keys are silent selectors, including while REC runs. */
+            static const uint8_t lanes[11] = {0, 2, 4, 5, 3, 7, 9, 10, 11, 12, 15};
+            dstep_t before[NSTEP];
+            uint32_t r, n, seen = 0, ok = 1;
+            memset(TDRUM->dstep, 0, sizeof TDRUM->dstep);
+            memcpy(before, TDRUM->dstep, sizeof before);
+            song.g[G_CLOCK] = 0;
+            drum_cursor = 18;
+            for (r = 0; r < 2u; r++) {
+                song.playing = r; song.rec = r ? 1u << TRK_DRUM : 0;
+                for (n = 0; n < 11u; n++) {
+                    uint32_t age = drums.age;
+                    memset(pad_lit, 0, sizeof pad_lit); drums.hits = 0;
+                    key(PUNCH_BLACK[n]);
+                    ok &= drum_lane == lanes[n] && drum_cursor == 18 && drums.age == age &&
+                          !memcmp(before, TDRUM->dstep, sizeof before);
+                    ok &= (keys_lit() & (1u << PUNCH_BLACK[n])) != 0;
+                    for (i = 0; i < DRUM_LANES; i++) ok &= !pad_lit[i];
+                    if (!r) { ok &= !(seen & (1u << drum_lane)); seen |= 1u << drum_lane; }
+                }
+            }
+            check(ok, "grid: all 11 black keys select unique voices, LED on; no hit, REC or step change");
+            song.playing = 0; song.rec = 0;
+            {   /* Every white step changes only the chosen lane in the chosen bank. */
+                dstep_t expected[NSTEP];
+                uint32_t b, w, n, idx;
+                ok = 1; TDRUM->p[P_SLEN] = 64;
+                memset(TDRUM->dstep, 0, sizeof TDRUM->dstep);
+                for (i = 0; i < NSTEP; i++) dstep_set(&TDRUM->dstep[i], 1, LV_SOFT, 2);
+                memcpy(expected, TDRUM->dstep, sizeof expected);
+                for (n = 0; n < 11u; n++) {
+                    key(PUNCH_BLACK[n]);
+                    for (b = 0; b < 4u; b++) {
+                        drum_cursor = (uint8_t)(b * 16u);
+                        for (w = 0; w < 16u; w++) {
+                            idx = b * 16u + w;
+                            key(key_of_white(w)); dstep_set(&expected[idx], lanes[n], LV_NORM, 0);
+                            ok &= drum_cursor == idx && !memcmp(expected, TDRUM->dstep, sizeof expected);
+                            key(key_of_white(w)); dstep_clr(&expected[idx], lanes[n]);
+                            ok &= !memcmp(expected, TDRUM->dstep, sizeof expected);
+                        }
+                    }
+                }
+                check(ok, "grid: all 16 whites toggle only the selected voice and bank, preserving other lanes");
+                TDRUM->p[P_SLEN] = 53; drum_cursor = 47;
+                tap(B_OCTUP);
+                check(drum_cursor == 52, "grid: OCT+ clamps the local cursor on a short fourth bank");
+                memcpy(expected, TDRUM->dstep, sizeof expected);
+                for (w = 5; w < 16u; w++) key(key_of_white(w));
+                check(drum_cursor == 52 && !memcmp(expected, TDRUM->dstep, sizeof expected),
+                      "grid: short bank ignores whites beyond LENGTH");
+                tap(B_OCTUP); check(drum_cursor == 4, "grid: short bank OCT+ wraps to page 1");
+                tap(B_OCTDN); check(drum_cursor == 52, "grid: short bank OCT- wraps to page 4");
+                TDRUM->p[P_SLEN] = 1; drum_cursor = 0;
+                tap(B_OCTUP); tap(B_OCTDN);
+                check(drum_cursor == 0, "grid: one-step pattern keeps both OCT directions bounded");
+            }
+            {   /* Real C captures: BD/SN/closed HH, all banks, short bank, cursor and playhead. */
+                static const uint8_t voice[3] = {0, 2, 4};
+                static const char *const names[3] = {"bd", "sn", "hh"};
+                uint32_t n, b;
+                char name[40];
+                memset(TDRUM->dstep, 0, sizeof TDRUM->dstep);
+                for (i = 0; i < NSTEP; i++) {
+                    if (!(i % 4u)) dstep_set(&TDRUM->dstep[i], 0, LV_NORM, 0);
+                    if (i % 8u == 4u) dstep_set(&TDRUM->dstep[i], 2, LV_HARD, 0);
+                    if (!(i % 2u)) dstep_set(&TDRUM->dstep[i], 4, LV_SOFT, 0);
+                }
+                song.playing = 1;
+                for (n = 0; n < 3u; n++) {
+                    drum_lane = voice[n]; TDRUM->p[P_SLEN] = 64;
+                    for (b = 0; b < 4u; b++) {
+                        drum_cursor = (uint8_t)(b * 16u + 2u); TDRUM->seq_idx = (uint8_t)(b * 16u + 1u);
+                        ui.force = 1; ui_draw();
+                        snprintf(name, sizeof name, "grid-%s-page%u", names[n], b + 1u); ppm(name);
+                    }
+                    TDRUM->p[P_SLEN] = 53; drum_cursor = 52; TDRUM->seq_idx = 48;
+                    ui.force = 1; ui_draw();
+                    snprintf(name, sizeof name, "grid-%s-page4-short", names[n]); ppm(name);
+                }
+                drum_lane = 2; drum_cursor = 2; TDRUM->p[P_SLEN] = 64; TDRUM->seq_idx = 4;
+                ui.force = 1; ui_draw(); ppm("grid-sn-playhead-hit");
+                check(swap16(screen[(24u + 2u * 10u + 5u) * 240u + 24u + 4u * 13u + 3u]) == C_BLACK,
+                      "grid: playhead stays visible on a white HARD hit");
+                TDRUM->seq_idx = 1; ui.force = 1; ui_draw();
+                check(swap16(screen[(24u + 2u * 10u + 5u) * 240u + 24u + 13u + 3u]) == C_WHITE,
+                      "grid: playhead stays visible on an empty step");
+                {
+                    uint32_t row, col, ok = 1;
+                    for (row = 0; row < DRUM_LANES; row++)
+                        for (col = 0; col < 16u; col++) {
+                            const dstep_t *s = &TDRUM->dstep[col];
+                            uint16_t want = dstep_has(s, row) ? lvl_col(dstep_lvl(s, row)) :
+                                            row == drum_lane ? TE_G2 : TE_G1;
+                            ok &= swap16(screen[(24u + row * 10u + 2u) * 240u + 24u + col * 13u + 1u]) == want;
+                        }
+                    check(ok, "grid: all sixteen instrument rows and sixteen time columns show their own hits");
+                }
+                song.playing = 0;
+            }
+            ok = 1; drum_lane = 0;
+            for (n = 0; n < DRUM_LANES; n++) {
+                if (n) { encs[panel.enc[EN_K1]] = 1; frame(); }
+                ok &= drum_lane == n;
+            }
+            check(ok, "grid: K1 still reaches all 16 voices, including the five without black shortcuts");
+            memset(TDRUM->dstep, 0, sizeof TDRUM->dstep);
+            TDRUM->p[P_SLEN] = 32; drum_lane = 0; drum_cursor = 16;
+        }
         memset(pad_lit, 0, sizeof pad_lit);
         encs[panel.enc[EN_K1]] = 3; frames(2);
         check(drum_lane == 3 && pad_lit[3], "grid: KNOB 1 picks the sound and plays it");
@@ -884,12 +1006,44 @@ int main(int argc, char **argv)
         memset(pad_lit, 0, sizeof pad_lit);
         key(key_of_white(9)); frame();
         check(pad_lit[9] && !dstep_has(&TDRUM->dstep[25], 3), "kit: the keys play the pads again, no step set");
+        {
+            dstep_t before[NSTEP];
+            memcpy(before, TDRUM->dstep, sizeof before);
+            memset(pad_lit, 0, sizeof pad_lit);
+            key(3);
+            check(pad_lit[lane_of_key(3)] && drum_lane == 3 &&
+                  !memcmp(before, TDRUM->dstep, sizeof before), "kit: black keys still play live, no GRID selection or step write");
+            ui.force = 1; ui_draw(); ppm("grid-kit-live");
+        }
         encs[panel.enc[EN_SELECT]] = -1; frame();
         check(drum_page == 0, "DRUMS: SELECT left: grid");
+        {
+            dstep_t before[NSTEP];
+            uint32_t ok = 1, mute = drum_mute;
+            memcpy(before, TDRUM->dstep, sizeof before);
+            TDRUM->p[P_SLEN] = 64;
+            press(B_SEQ); frames(3);
+            for (i = 0; i < 4u; i++) {
+                key(PUNCH_BLACK[i]);
+                ok &= ui.step_page == i && drum_lane == 3 && drum_cursor == 20;
+            }
+            release(B_SEQ); frames(20);
+            check(ok && !drum_page && !memcmp(before, TDRUM->dstep, sizeof before),
+                  "grid + SEQ held: all four black bank shortcuts preserved, no voice or pattern edit");
+            er_mute = 0;
+            press(B_EDIT); frames(3); key(25); key(key_of_white(0));
+            check(er_mute && drum_mute == (mute ^ 1u) && !memcmp(before, TDRUM->dstep, sizeof before),
+                  "grid + EDIT held: black mute mode and white live mute preserve the pattern");
+            release(B_EDIT); frames(20);
+            check(!er_mute && !drum_page, "grid: releasing used SEQ/EDIT layers keeps GRID, not KIT");
+            drum_mute = mute; TDRUM->p[P_SLEN] = 32;
+        }
         go_home(); frame();
         memset(pad_lit, 0, sizeof pad_lit);
         pen_lane = 0;
         press(B_SEQ); frames(3);
+        key(3);
+        check(ui.step_page == 1, "SEQ held: first four black keys retain bank shortcuts");
         encs[panel.enc[EN_K1]] = 2; frames(2);
         check(pen_lane == 2 && pad_lit[2], "SEQ layer, drum track: KNOB 1 picks the sound and plays it");
         release(B_SEQ); frames(2);
@@ -1006,8 +1160,8 @@ int main(int argc, char **argv)
         vis_style = 0; song.sel = 0; go_home(); frames(20);
     }
 
-    {   /* 0.7.0: ENV / LFO knobs with a range of 100 or more move 4 per slow detent (and x3 again from accel() when
-         * turned fast); enums, the mixer and the tempo keep their steps. frames(5) (80 ms) makes a detent slow */
+    {   /* ENV / LFO knobs with a range of 100 or more move 1 per slow detent and 12 per fast detent (accel() x3, then
+         * x4); enums, the mixer and the tempo keep their steps. frames(5) (80 ms) makes a detent slow */
         int16_t keep[sizeof trk[0].p / sizeof trk[0].p[0]], bpm = song.g[G_BPM];
         uint32_t n;
         #define KN(k, d) do { encs[panel.enc[EN_K1 + (k)]] = (d); frame(); } while (0)
@@ -1017,16 +1171,18 @@ int main(int argc, char **argv)
         tap(B_ENV); frames(5);
         check(!strcmp(PAGES[ui.page].title, "ENV"), "ENV: the envelope page");
         trk[0].p[P_ATK] = 10; KN(0, 1);
-        check(trk[0].p[P_ATK] == 14, "ENV ATK: a slow detent moves 4");
+        check(trk[0].p[P_ATK] == 11, "ENV ATK: a slow detent moves 1");
         KN(0, 1);
-        check(trk[0].p[P_ATK] == 26, "ENV ATK: a fast detent moves 12 (accel x3)");
+        check(trk[0].p[P_ATK] == 23, "ENV ATK: a fast detent moves 12 (accel x3, x4)");
+        frames(5); KN(0, -1);
+        check(trk[0].p[P_ATK] == 22, "ENV ATK: a slow negative detent moves 1");
         trk[0].p[P_ATK] = 0;
         for (n = 0; n < 128u && trk[0].p[P_ATK] < 127; n++) { frames(5); KN(0, 1); }
         printf("ui: ENV ATK 0 -> 127 in %u slow detents\n", n);
-        check(trk[0].p[P_ATK] == 127 && n <= 33u, "ENV ATK: a full sweep takes <= 33 slow detents");
+        check(trk[0].p[P_ATK] == 127 && n == 127u, "ENV ATK: a full sweep takes 127 slow detents (one index each)");
         trk[0].p[P_REL] = 127;
         for (n = 0; n < 128u && trk[0].p[P_REL] > 0; n++) { frames(5); KN(3, -1); }
-        check(trk[0].p[P_REL] == 0 && n <= 33u, "ENV REL: the sweep down takes <= 33 slow detents");
+        check(trk[0].p[P_REL] == 0 && n == 127u, "ENV REL: the sweep down takes 127 slow detents");
         trk[0].p[P_ESYNC] = 1;
         for (n = 0; n < 3u; n++) {
             uint32_t id = n == 0u ? P_ATK : n == 1u ? P_DEC : P_REL;
@@ -1044,17 +1200,17 @@ int main(int argc, char **argv)
         tap(B_ENV); frames(5);
         check(!strcmp(PAGES[ui.page].title, "ENV DEST"), "ENV again: ENV DEST");
         trk[0].p[P_ED_FLT] = 0; KN(0, -1);
-        check(trk[0].p[P_ED_FLT] == -4, "ENV DEST FLT (-64..63): a slow detent moves 4");
+        check(trk[0].p[P_ED_FLT] == -1, "ENV DEST FLT (-64..63): a slow detent moves 1");
         tap(B_LFO); frames(5);
         check(!strcmp(PAGES[ui.page].title, "LFO"), "LFO: the source page");
         trk[0].p[P_LRATE] = 60; KN(0, 1);
-        check(trk[0].p[P_LRATE] == 64, "LFO RATE: a slow detent moves 4");
+        check(trk[0].p[P_LRATE] == 61, "LFO RATE: a slow detent moves 1");
         KN(0, 1);
-        check(trk[0].p[P_LRATE] == 76, "LFO RATE: a fast detent moves 12");
+        check(trk[0].p[P_LRATE] == 73, "LFO RATE: a fast detent moves 12");
         trk[0].p[P_LRATE] = 0;
         for (n = 0; n < 128u && trk[0].p[P_LRATE] < 127; n++) { frames(5); KN(0, 1); }
         printf("ui: LFO RATE 0 -> 127 in %u slow detents\n", n);
-        check(trk[0].p[P_LRATE] == 127 && n <= 33u, "LFO RATE: a full sweep takes <= 33 slow detents");
+        check(trk[0].p[P_LRATE] == 127 && n == 127u, "LFO RATE: a full sweep takes 127 slow detents");
         trk[0].p[P_LWAVE] = 0; frames(5); KN(1, 1);
         check(trk[0].p[P_LWAVE] == 1, "LFO WAVE (an enum): still one wave per detent");
         KN(1, 1);
@@ -1064,7 +1220,7 @@ int main(int argc, char **argv)
         tap(B_LFO); frames(5);
         check(!strcmp(PAGES[ui.page].title, "LFO DEST"), "LFO again: LFO DEST");
         trk[0].p[P_LD_AMP] = 0; KN(3, 1);
-        check(trk[0].p[P_LD_AMP] == 4, "LFO DEST AMP: a slow detent moves 4");
+        check(trk[0].p[P_LD_AMP] == 1, "LFO DEST AMP: a slow detent moves 1");
         memcpy(trk[0].p, keep, sizeof keep);
         go_home(); frames(2); tap(B_GLO); frames(5);
         trk[1].p[P_MUTE] = 0; trk[1].p[P_LEVEL] = 100; KN(1, 1);
@@ -1076,6 +1232,78 @@ int main(int argc, char **argv)
         encs[panel.enc[EN_SELECT]] = 1; frame();
         check(song.g[G_BPM] == bpm + 1, "HOME SELECT: the tempo still moves 1 per slow detent");
         song.g[G_BPM] = bpm; frames(2);
+        #undef KN
+    }
+
+    {   /* REC on the selected, playing track: a sound knob turned writes a parameter lock on the step playing (the
+         * existing 24 slots, one undo per pass). Another track's REC, a pattern knob, a global knob and a stopped
+         * transport write none; with every slot used: NO LOCK LEFT and no slot changes */
+        int16_t keep[sizeof trk[0].p / sizeof trk[0].p[0]], bpm = song.g[G_BPM], gv;
+        plock_t none[NLOCK], before[NLOCK];
+        uint8_t fam_keep[sizeof ui.fam_last];
+        uint32_t i, s1, s2;
+        int k;
+        #define KN(k, d) do { encs[panel.enc[EN_K1 + (k)]] = (d); frame(); } while (0)
+        #define PAGE(name) do { for (i = 0; i < NPAGES && strcmp(PAGES[i].title, name); i++) ; \
+            open_family(PAGES[i].fam); ui.page = (uint8_t)i; ui.fam_last[PAGES[i].fam] = (uint8_t)i; page_entered(); \
+            frames(16); } while (0)
+        memcpy(keep, trk[0].p, sizeof keep);
+        memcpy(fam_keep, ui.fam_last, sizeof fam_keep);
+        song.sel = 0; song.rec = 0; go_home(); frames(16);
+        locks_clear(&trk[0]); locks_clear(&trk[1]);
+        memcpy(none, trk[0].lock, sizeof none);
+        trk[0].p[P_ESYNC] = 0;
+        song.g[G_BPM] = GP[G_BPM].min;                 /* (long steps: two turns land on one step) */
+        transport_req = 1; frames(8);
+        PAGE("ENV");
+        check(song.playing && cur_page()->id[0] == P_ATK && p_lockable(P_ATK), "REC lock: ENV page, transport playing");
+        song.rec = 2u; trk[0].p[P_ATK] = 40; KN(0, 1);
+        check(trk[0].p[P_ATK] == 41 && !lock_count(&trk[0]) && !lock_count(&trk[1]),
+              "REC lock: another track's REC: the knob edits, no lock");
+        song.rec = 1u; frames(5); KN(0, 1); s1 = trk[0].seq_idx;
+        k = lock_find(&trk[0], s1, P_ATK, 0);
+        check(trk[0].p[P_ATK] == 42 && k >= 0 && trk[0].lock[k].val == 42 && lock_count(&trk[0]) == 1u,
+              "REC lock: the knob writes a lock on the step playing");
+        KN(0, 1); s2 = trk[0].seq_idx;
+        k = lock_find(&trk[0], s1, P_ATK, 0);
+        check(s1 == s2 && trk[0].p[P_ATK] == 54 && k >= 0 && trk[0].lock[k].val == 54 && lock_count(&trk[0]) == 1u,
+              "REC lock: a second turn on the same step overwrites that lock");
+        check(undo_swap(0) && !memcmp(none, trk[0].lock, sizeof none), "REC lock: EDIT + OCT- undo takes it back");
+        check(undo_swap(1) && lock_find(&trk[0], s1, P_ATK, 0) >= 0, "REC lock: redo brings it again");
+        locks_restore(&trk[0]); trk[0].p[P_ATK] = 7;
+        lock_step(&trk[0], s1);
+        check(trk[0].p[P_ATK] == 54, "REC lock: captured value plays back");
+        lock_step(&trk[0], (s1 + 1u) % trk_len(&trk[0]));
+        check(trk[0].p[P_ATK] == 7, "REC lock: playback restores the unlocked base");
+        memcpy(before, trk[0].lock, sizeof before);
+        open_family(FAM_SEQ); frame(); open_family(FAM_SEQ); frames(16);
+        check(cur_page()->id[1] == P_SDIV && !p_lockable(P_SDIV), "REC lock: the PATTERN page (DIV, not lockable)");
+        KN(1, 1); KN(1, -1);
+        check(!memcmp(before, trk[0].lock, sizeof before), "REC lock: a pattern knob writes no lock");
+        PAGE("DLY");
+        gv = song.g[G_DTIME]; KN(0, gv < GP[G_DTIME].max ? 1 : -1);
+        check(cur_page()->scope == SC_GLOBAL && song.g[G_DTIME] != gv && !memcmp(before, trk[0].lock, sizeof before),
+              "REC lock: a global knob edits, no lock");
+        song.g[G_DTIME] = gv;
+        transport_req = 2; frames(8);
+        PAGE("ENV");
+        song.rec = 1u; trk[0].p[P_DEC] = 30; KN(1, 1);
+        check(!song.playing && trk[0].p[P_DEC] == 31 && !memcmp(before, trk[0].lock, sizeof before),
+              "REC lock: stopped: the knob edits, no lock");
+        song.rec = 0; transport_req = 1; frames(8);
+        locks_clear(&trk[0]);
+        for (i = 0; i < NLOCK; i++) lock_set(&trk[0], i, P_CHOR, 10);
+        memcpy(before, trk[0].lock, sizeof before);
+        song.rec = 1u; ui.msg[0] = 0; trk[0].p[P_DEC] = 30; frames(5); KN(1, 1);
+        check(lock_count(&trk[0]) == NLOCK && trk[0].p[P_DEC] == 31 && !strcmp(ui.msg, "NO LOCK LEFT") &&
+              !memcmp(before, trk[0].lock, sizeof before), "REC lock: every slot used: NO LOCK LEFT, the table unchanged");
+        song.rec = 0; transport_req = 2; frames(8);
+        locks_clear(&trk[0]);
+        memcpy(trk[0].p, keep, sizeof keep);
+        song.g[G_BPM] = bpm; ui.msg[0] = 0;
+        memcpy(ui.fam_last, fam_keep, sizeof fam_keep);
+        go_home(); frames(16);
+        #undef PAGE
         #undef KN
     }
 
@@ -1351,6 +1579,108 @@ int main(int argc, char **argv)
         ui.arm = 0; song.g[G_SLOT] = 1;
         go_home(); frames(4);
     }
+    {   /* Review regressions: REC routing, failed automation, drum edits and visible state. */
+        uint32_t i, mode;
+        settings.palette = 5; palette_set(5);
+        for (mode = 0; mode < 2u; mode++) {
+            song.playing = song.rec = 0; rec_wait = ft_on = ci_on = 0;
+            ft_closed = 0;                               /* independent cases, not the preceding take's 300ms close guard */
+            for (i = 0; i < NTRK; i++) steps_clear(&trk[i]);
+            if (mode) trk[0].step[0] = (step_t){.note={60}, .n=1, .time=ST_NOTE, .vel=100};
+            rec_tempo = (uint8_t)mode; rec_count = 0;
+            song.sel = TRK_DRUM; studio_open(SC_DRUM); drum_page = 0; drum_lane = drum_cursor = 0;
+            frames(8); tap(B_REC); key(0);
+            check(!rec_wait && (mode ? (song.playing && (song.rec & (1u << TRK_DRUM))) : (ft_on && !kb_grid)),
+                  "GRID REC: the first key starts a tempo/free take, not a step edit");
+            if (ft_on || song.playing) tap(B_PLAY);
+            if (rec_wait || song.rec) tap(B_REC);
+            frames(8);
+        }
+        song.playing = song.rec = 0; rec_wait = ft_on = ci_on = 0;
+        song.sel = 0; steps_clear(&trk[0]); trk[0].p[P_SLEN] = 64; open_family(FAM_ENV);
+        for (i = 0; i < NPAGES; i++)
+            if (PAGES[i].fam == FAM_ENV && PAGES[i].id[0] == P_ATK) ui.page = (uint8_t)i;
+        for (i = 0; i < NLOCK; i++) lock_set(&trk[0], i, P_ATK, 31);
+        trk[0].step[0] = (step_t){.note={60}, .n=1, .time=ST_NOTE, .vel=100};
+        undo_mark(&trk[0], 888); trk[0].step[0].note[0] = 64;
+        song.playing = 1; rec_begin(); trk[0].seq_idx = 32; trk[0].p[P_ATK] = 10;
+        {
+            plock_t before[NLOCK]; uint32_t sess = undo.sess;
+            memcpy(before, trk[0].lock, sizeof before); edit_param(0, 1);
+            check(undo.sess == sess && !memcmp(before, trk[0].lock, sizeof before),
+                  "REC full locks: failed insertion preserves the preceding Undo and locks");
+            check(undo_swap(0) && trk[0].step[0].note[0] == 60,
+                  "REC full locks: the preceding pattern edit remains undoable");
+        }
+        trk[0].seq_idx = 0; edit_param(0, 1);
+        {
+            int at = lock_find(&trk[0], 0, P_ATK, 0);
+            check(undo.sess == UNDO_REC(&trk[0]) && at >= 0 && trk[0].lock[at].val == trk[0].p[P_ATK],
+                  "REC full locks: overwriting an existing entry still records and marks Undo");
+        }
+        locks_clear(&trk[0]);
+        for (i = 0; i < NPAGES; i++) if (PAGES[i].fam == FAM_SEQ && PAGES[i].id[3] == P_SGATE) break;
+        ui.page = (uint8_t)i; trk[0].p[P_SGATE] = 70;
+        for (i = 0; i < 4u; i++) edit_param(i, 1);
+        check(lock_find(&trk[0], 0, P_SGATE, 0) < 0, "REC: all PATTERN controls, including GATE, stay unrecorded");
+        song.playing = song.rec = 0; song.sel = TRK_DRUM;
+        studio_open(SC_DRUM); drum_page = 0; drum_lane = drum_cursor = 0;
+        for (mode = 0; mode < 2u; mode++) {
+            steps_clear(TDRUM); TDRUM->p[P_SLEN] = 16; ui.step_sess = 0; undo.valid = 0;
+            dstep_set(&TDRUM->dstep[0], 0, LV_NORM, 0);
+            TDRUM->micro[0] = 7; step_fill_set(TDRUM, 0, FC_FILL); lock_set(TDRUM, 0, P_TFLT, 31);
+            if (!mode) grid_key(0);
+            else { encs[panel.enc[EN_K3]] = -1; drum_screen_input(0, BT_NONE); }
+            check(!dstep_mask(&TDRUM->dstep[0]) && !TDRUM->micro[0] && !step_fill(TDRUM, 0) &&
+                  lock_find(TDRUM, 0, P_TFLT, 0) < 0, "GRID white/K3: last-hit deletion clears the same metadata");
+            check(undo_swap(0) && dstep_has(&TDRUM->dstep[0], 0) && TDRUM->micro[0] == 7 &&
+                  step_fill(TDRUM, 0) == FC_FILL && lock_find(TDRUM, 0, P_TFLT, 0) >= 0,
+                  "GRID white/K3: Undo restores the hit and all metadata");
+        }
+        steps_clear(TDRUM); drum_lane = drum_cursor = 0; frames(2);
+        fm1_in.notes = (1u << 0) | (1u << 3); frame(); fm1_in.notes = 0; frame();
+        check(drum_lane == 2 && dstep_has(&TDRUM->dstep[0], 2) && !dstep_has(&TDRUM->dstep[0], 0),
+              "GRID same scan: voice selection precedes a lower white key");
+        steps_clear(TDRUM); drum_lane = 2; frames(2);
+        fm1_in.notes = (1u << 1) | (1u << 26); frame(); fm1_in.notes = 0; frame();
+        check(drum_lane == 0 && dstep_has(&TDRUM->dstep[15], 0) && !dstep_has(&TDRUM->dstep[15], 2),
+              "GRID same scan: voice selection also precedes a higher white key");
+        steps_clear(TDRUM); drum_lane = 0;
+        lk_push(KB_GRID, 0, 1); lk_push(KB_GRID, 0, 0); lk_push(KB_GRID, 0, 1); lk_push(KB_GRID, 3, 1); frame();
+        check(drum_lane == 2 && !dstep_mask(&TDRUM->dstep[0]),
+              "GRID same batch: repeated step presses are not collapsed");
+        song.playing = 1; TDRUM->seq_idx = 1; ui.msg_t = 0; ui.force = 1; ui_draw();
+        {
+            uint16_t header[240 * 24];
+            memcpy(header, screen, sizeof header);
+            song.rec = 1u << TRK_DRUM; ui_draw();
+            check(memcmp(header, screen, sizeof header) && swap16(screen[9u * 240u + 196u]) == TE_RED,
+                  "GRID: REC state redraws a persistent red indicator");
+        }
+        ppm("review-grid-rec");
+        song.sel = 0; song.rec = 0; studio_open(SC_TRK); ui.msg_t = 0; ui.force = 1; ui_draw();
+        {
+            uint16_t header[240 * 36];
+            memcpy(header, screen, sizeof header);
+            song.rec = 1; ui_draw();
+            check(memcmp(header, screen, sizeof header), "Mixer: REC redraws its live-only header without other changes");
+        }
+        ppm("review-mixer-rec");
+        song.playing = song.rec = 0; ui.msg_t = 0;
+        song.sel = TRK_DRUM; open_family(FAM_ENV); frame(); tap(B_HOME); tap(B_EDIT);
+        check(on_drum_page(), "Drum help: HOME then EDIT reaches the supported drum editor");
+        arrangement.count = 1; arrangement.entry[0].scene = 0; arrangement.entry[0].bars = 64;
+        arrangement_clock.running = 1; arrangement_clock.index = 0; arrangement_clock.bar = 63;
+        song_cursor = 0; studio_open(SC_SONG); ui.force = 1; ui_draw(); ppm("review-song-64");
+        {
+            uint32_t x, y, clear = 1;
+            for (y = 47; y < 64u; y++) for (x = 235; x < 240u; x++)
+                clear &= swap16(screen[y * 240u + x]) == C_BLACK;
+            check(clear, "SONG 64 bars: the label and playing marker leave the right edge clear");
+        }
+        arrangement_clock.running = arrangement_enabled = 0; arr_defaults(&arrangement);
+        fm1_in.notes = fm1_in.buttons = 0; song.sel = 0; go_home(); frames(8);
+    }
     {   /* fuzz: 20000 frames of random buttons (held or tapped), knobs and keys, with the audio running
          * between frames; every draw stays on the screen (lcd_blit / lcd_fill assert it) */
         uint32_t f, seed = 777, held = 0;
@@ -1365,7 +1695,11 @@ int main(int argc, char **argv)
             if (R(30) == 0) held = 0;
             if (R(700) == 0) ly_lock = (uint8_t)R(LY_COUNT);              /* (a layer locked open, at random) */
             fm1_in.buttons = held & ~(1u << panel.btn[B_HOME]);
-            if (R(4) == 0) encs[R(7)] += (int32_t)R(5) - 2;
+            if (R(4) == 0) {
+                uint32_t e = R(7);
+                int32_t delta = (int32_t)R(5) - 2;
+                encs[e] += delta;
+            }
             fm1_in.notes = R(10) == 0 ? (1u << R(27)) : (R(3) ? fm1_in.notes : 0);
             frame();
             if (ui.menu) { ui.menu = 0; ui.force = 1; }               /* (the menu is tested above) */

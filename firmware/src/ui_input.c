@@ -147,6 +147,9 @@ static uint32_t keys_lit(void)
     }
     if (kb_grid) {                                 /* the DRUMS grid page: the sound's steps of this page */
         uint32_t len = trk_len(TDRUM), b0 = drum_cursor / 16u * 16u;
+        for (i = 0; i < 11u; i++)
+            if (GRID_LANE[i] == drum_lane)
+                m |= 1u << PUNCH_BLACK[i];
         for (i = 0; i < 16u; i++) {
             uint32_t idx = b0 + i, on;
             if (idx >= len)
@@ -458,11 +461,29 @@ static void edit_param(uint32_t slot, int32_t steps)
     d = page_desc(pg, slot, &vp);
     if (!d || !vp || d->max == d->min)
         return;
-    if ((pg->fam == FAM_ENV || pg->fam == FAM_LFO) && !d->names && d->max - d->min >= 100)
-        steps *= 4;                                       /* ENV / LFO wide ranges: ~32 slow detents end to end */
-    v = d->names == ESYNC_NAMES || d->names == N_IBITS || d->names == N_IRATE ? names_turn(d, *vp, steps)   /* (a name a detent) */
-                                    : clamp(*vp + accel(EN_K1 + slot, steps, d->max - d->min), d->min, d->max);
-    *vp = (int16_t)v;
+    if (d->names == ESYNC_NAMES || d->names == N_IBITS || d->names == N_IRATE) {
+        v = names_turn(d, *vp, steps);                    /* (a name a detent) */
+    } else {
+        int32_t a = accel(EN_K1 + slot, steps, d->max - d->min);
+        if (a != steps && (pg->fam == FAM_ENV || pg->fam == FAM_LFO) && !d->names && d->max - d->min >= 100)
+            a *= 4;                                       /* ENV / LFO wide ranges: one index a slow detent, 12 fast */
+        v = clamp(*vp + a, d->min, d->max);
+    }
+    if (v != *vp && pg->scope != SC_GLOBAL && id != P_SGATE && p_lockable(id) && vp == &TSEL->p[id % P_COUNT] && song.playing &&
+        ((song.rec >> song.sel) & 1u)) {                 /* REC on the selected track: a lock on the step playing */
+        int ok;
+        fm1_irq_off();
+        ok = lock_find(TSEL, TSEL->seq_idx, id, 1) >= 0;
+        if (ok) {
+            undo_mark(TSEL, UNDO_REC(TSEL));              /* only a recordable edit replaces Undo */
+            ok = lock_set(TSEL, TSEL->seq_idx, id, v);
+        }
+        *vp = (int16_t)v;
+        fm1_irq_on();
+        if (!ok)
+            ui_message("NO LOCK LEFT");
+    } else
+        *vp = (int16_t)v;
     if (pg->scope != SC_GLOBAL && p_lockable(id))
         ui.lock_par = (uint8_t)id;                        /* the SEQ layer's lock parameter: the last one touched */
     if (pg->scope != SC_GLOBAL)
@@ -784,12 +805,19 @@ static int layers_input(uint32_t note_edges, uint32_t *pressed, uint32_t home)
     if (held != LY_PLAY && held != ui.layer && ui.layer != LY_PLAY)
         ui.layer = (uint8_t)held;                         /* (from one layer straight to another) */
     if (held == LY_PLAY) {
+        uint32_t end = lk_w, r;
         thr_req = 0;                                      /* (the THROWs: FX let go) */
-        while (lk_r != lk_w) {                            /* a key let go after its layer: its release only */
+        if (grid_keys_on())
+            for (r = lk_r; r != end; r++) {
+                uint32_t e = lk_q[r % LKQ];
+                if ((e >> 8) == KB_GRID && ((e >> 7) & 1u) && punch_key(e & 31u) < 0)
+                    grid_key(e & 31u);                    /* choose the voice before this batch's step presses */
+            }
+        while (lk_r != end) {                             /* retain every step press, including repeated toggles */
             uint32_t e = lk_q[lk_r % LKQ];
             lk_r++;
             if ((e >> 8) == KB_GRID) {                    /* the DRUMS grid page: a step key */
-                if (((e >> 7) & 1u) && grid_keys_on())
+                if (((e >> 7) & 1u) && grid_keys_on() && punch_key(e & 31u) >= 0)
                     grid_key(e & 31u);
             } else if (!((e >> 7) & 1u)) {
                 layer_key(e >> 8, e & 31u, 0);
@@ -841,6 +869,15 @@ static int layers_input(uint32_t note_edges, uint32_t *pressed, uint32_t home)
                 ui_message(undo_swap(0) ? "UNDO" : "NOTHING TO UNDO");
             else
                 ui_message(undo_swap(1) ? "REDO" : "NOTHING TO REDO");
+        }
+    }
+    if (held == LY_SCALE) {                               /* SEL + OCT- / OCT+ on Tape: capture / lift, drop */
+        uint32_t ob = 1u << panel.btn[B_OCTDN], pb = 1u << panel.btn[B_OCTUP];
+        uint32_t press = *pressed & (ob | pb);
+        if (press) {
+            used[held] = 1;                               /* (SEL let go: not a tap) */
+            if (ui.home && !vis_shown())
+                orbit_edit(!(press & ob));
         }
     }
     if (held == LY_STEP) {                                /* SEQ + OCT- / OCT+: the page; a step held: OCT- its nudge, locks and
@@ -975,8 +1012,8 @@ static void ui_input(void)
             song.seq_mode = 0;
         }
     }
-    kb_grid = (uint8_t)grid_keys_on();                  /* (seq.c: the keys are the grid's steps) */
     if (ui.menu) {                                      /* HOME / REC taps do nothing here */
+        kb_grid = 0;
         punch.hold = 0;
         thr_req = 0;
         if (!ui.home_t0)
@@ -992,6 +1029,7 @@ static void ui_input(void)
     pressed &= ~(ly_bit[LY_FX] | ly_bit[LY_ERASE] | ly_bit[LY_ROLL] | ly_bit[LY_STEP] | ly_bit[LY_SCALE] | ly_bit[LY_MIX] |
                  ly_bit[LY_SONG]);
     holds_input(pressed, fm1_ms);
+    kb_grid = (uint8_t)grid_keys_on();                    /* REC changes routing before the next audio block */
     pressed &= ~((on_song_page() ? 0u : 1u << panel.btn[B_REC]) | (1u << panel.btn[B_SAVE]));
     if (layered || ui.hold_kind) {                      /* a layer / a hold: the rest waits */
         if ((s = panel_enc(EN_SELECT)) != 0) {           /* (the tempo always) */
@@ -1056,7 +1094,6 @@ static void ui_input(void)
             break;
         case B_OCTDN:
         case B_OCTUP: {
-            if (ui.home && !vis_shown()) { orbit_edit(b == B_OCTUP); break; }
             uint32_t both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
             if (is_drum(TSEL))
                 break;                                  /* the drum track: ghost / hard while held (seq.c) */

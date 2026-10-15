@@ -40,8 +40,14 @@ static void font_ref_build(void)
         big_off[gi] = (uint16_t)o;
         for (y = 0; y < 32u; y++)
             for (x = 0; x < wb; x++) {
-                uint32_t sx = x / 2u, v = s[(y / 2u) * bs + sx / 2u];
-                v = (sx & 1u) ? (v & 15u) : (v >> 4);
+                uint32_t sx = x / 2u, v;
+                if (FONT_S.bpp == 1u) {
+                    uint32_t bit = (y / 2u) * ws + sx;
+                    v = (s[bit / 8u] & (128u >> (bit % 8u))) ? 15u : 0u;
+                } else {
+                    v = s[(y / 2u) * bs + sx / 2u];
+                    v = (sx & 1u) ? (v & 15u) : (v >> 4);
+                }
                 if (x & 1u) big_data[o + y * bb + x / 2u] |= (uint8_t)v;
                 else big_data[o + y * bb + x / 2u] = (uint8_t)(v << 4);
             }
@@ -50,6 +56,7 @@ static void font_ref_build(void)
     }
     FONT_L2X = FONT_L;
     FONT_L2X.sh = 0;
+    FONT_L2X.bpp = 4;
     FONT_L2X.off = big_off;
     FONT_L2X.data = big_data;
 }
@@ -73,6 +80,23 @@ static void t_font(void)
     }
     printf("font: %u characters, %u pixels compared, %u different\n", 96u, n, bad);
     scheck(bad == 0, "font: FONT_L from S at 2x = the stored 2x font, pixel for pixel");
+    {
+        static const uint8_t data[] = {0xaa, 0x80}, adv[] = {3}, bw[] = {3};
+        static const uint16_t off[] = {0};
+        const felucca_font_t f = {3, 0, 'A', 'A', 0, 1, adv, bw, off, data};
+        cv_begin(3, 3, C_BLACK); cv_text(0, 0, &f, "A", C_WHITE);
+        for (i = 0; i < 9u; i++)
+            scheck(cv_px[i] == swap16(i & 1u ? C_BLACK : C_WHITE),
+                   "font: packed odd-width rows cross byte boundaries without padding");
+    }
+    {
+        static const uint8_t data[] = {0x01, 0x7f}, adv[] = {4}, bw[] = {4};
+        static const uint16_t off[] = {0}, expected[] = {0, 0x1082, 0x73ae, 0xffff};
+        const felucca_font_t f = {1, 0, 'A', 'A', 0, 4, adv, bw, off, data};
+        cv_begin(4, 1, C_BLACK); cv_text(0, 0, &f, "A", C_WHITE);
+        for (i = 0; i < 4u; i++)
+            scheck(cv_px[i] == swap16(expected[i]), "font: antialiased alpha retains intermediate shades");
+    }
     for (i = 0; i < 20000u; i++) {                    /* random text anywhere, partly or wholly off the canvas */
         uint32_t len = rn(40), k, w = 1u + rn(240), h = 1u + rn(124);
         const felucca_font_t *f = rn(2) ? &FONT_L : &FONT_S;

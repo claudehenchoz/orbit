@@ -60,6 +60,7 @@ static int orbit_drop(uint32_t track, uint32_t at)
             (trk[track].lock[i].step < at || trk[track].lock[i].step >= at + count)) keep++;
     for (i = 0; i < orbit_tape.nlock; i++) if (orbit_tape.lock[i].step < count) need++;
     if (keep + need > NLOCK) { fm1_irq_on(); return 0; }
+    undo_mark(&trk[track], (undo_sess += 4u) | 3u);
     locks_restore(&trk[track]);
     for (i = 0; i < count; ++i) {
         trk[track].step[at+i] = orbit_tape.steps[i];

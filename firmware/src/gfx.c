@@ -8,6 +8,7 @@ typedef struct {               /* proportional, see tools/gen_font.py */
     uint8_t pad;               /* bitmap starts this many pixels left of the pen */
     uint8_t first, last;
     uint8_t sh;                /* 1: the bitmaps are another font's, drawn at 2x (L = S at 2x, no copy) */
+    uint8_t bpp;               /* 1: packed binary alpha; 4: row-aligned alpha nibbles */
     const uint8_t *adv;        /* advance per glyph */
     const uint8_t *bw;         /* bitmap width per glyph (starts FONT_PAD left of the pen) */
     const uint16_t *off;       /* byte offset of each glyph */
@@ -88,7 +89,7 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
         cv_px[i] = swap16(bg);
 }
 
-static void cv_blit(uint32_t x, uint32_t y) { lcd_blit(x, y, cv_w, cv_h, cv_px); }
+static __attribute__((noinline)) void cv_blit(uint32_t x, uint32_t y) { lcd_blit(x, y, cv_w, cv_h, cv_px); }
 
 /* canvas rows r0 .. cv_h-1 only, to screen row y + r0 */
 static void cv_blit_from(uint32_t x, uint32_t y, uint32_t r0)
@@ -154,6 +155,17 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
     return ch - f->first;
 }
 
+static inline uint32_t font_alpha(const uint8_t *data, uint32_t w, uint32_t x, uint32_t y, uint32_t bpp)
+{
+    if (bpp == 1u) {
+        uint32_t bit = y * w + x;
+        return ((data[bit >> 3] >> (7u - (bit & 7u))) & 1u) * 15u;
+    }
+    {
+        uint32_t v = data[y * ((w + 1u) / 2u) + x / 2u];
+        return x & 1u ? v & 15u : v >> 4;
+    }
+}
 /* text, alpha-blended onto black with colour c; returns the end x */
 static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
 {
@@ -162,15 +174,13 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
     for (a = 0; a < 16u; a++)
         ramp[a] = (uint16_t)(((r * a / 15u) << 11) | ((g * a / 15u) << 5) | (b * a / 15u));
     for (; *s; s++) {
-        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w, bpr;
+        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w;
         const uint8_t *gd;
         w = f->bw[gi];
-        bpr = ((w >> f->sh) + 1u) / 2u;
         gd = f->data + f->off[gi];
         for (gy = 0; gy < f->h; gy++)
             for (gx = 0; gx < w; gx++) {
-                uint32_t sx = gx >> f->sh, v = gd[(gy >> f->sh) * bpr + sx / 2u];
-                v = (sx & 1u) ? (v & 15u) : (v >> 4);
+                uint32_t v = font_alpha(gd, w >> f->sh, gx >> f->sh, gy >> f->sh, f->bpp);
                 if (v)
                     cv_pset(x - f->pad + (int32_t)gx, y + (int32_t)gy, ramp[v]);
             }

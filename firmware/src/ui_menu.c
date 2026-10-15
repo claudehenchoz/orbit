@@ -108,6 +108,8 @@ static void draw_menu(void)
             cv_text(4, 198, &FONT_S, "VOICE: REF. KLATTSCH (MIT)", C_DIM);
         } else {
             int32_t x = 4;
+            uint32_t rows = MS_FIRST[sec + 1u] - MS_FIRST[sec];
+            int32_t dy = rows > 3u ? 48 : MI_DY;
             for (i = 0; i < MS_COUNT; i++) {        /* the sections as tabs: this one lit */
                 int32_t w = text_w(&FONT_S, MS_NAME[i]);
                 if (i == sec)
@@ -117,12 +119,12 @@ static void draw_menu(void)
             }
             for (i = MS_FIRST[sec]; i < MS_FIRST[sec + 1u]; i++) {
                 uint32_t r = i - MS_FIRST[sec];
-                int32_t y = MI_Y0 + (int32_t)r * MI_DY, xv;
+                int32_t y = MI_Y0 + (int32_t)r * dy, xv;
                 int cur = i == ui.menu_sel;
                 uint16_t vc;
                 const char *v = mi_value(i, &vc);
                 char k[4] = {'K', (char)('1' + r), 0, 0};
-                cv_rect(4, y + 2, 4, MI_DY - 8, cur ? C_WHITE : TE_COL[r & 3u]);   /* the knob's colour */
+                cv_rect(4, y + 2, 4, dy - 8, cur ? C_WHITE : TE_COL[r & 3u]);   /* the knob's colour */
                 xv = cv_text(14, y, &FONT_S, k, TE_COL[r & 3u]);
                 cv_text(xv + 6, y, &FONT_S, MI_NAME[i], cur ? C_WHITE : C_GRAY);
                 if (v[0] && text_w(&FONT_L, v) <= 222) {
@@ -140,8 +142,10 @@ static void draw_menu(void)
                 if (i == MI_SERIAL && usb_serial != usb_cdc_now())
                     cv_text(xv + 8, y + 30, &FONT_S, "RESTART", C_AMB);   /* (usb.c: at the next start) */
             }
-            cv_text(4, MI_Y0 + 3 * MI_DY + 6, &FONT_S, "SELECT SECTION  KNOB SETS", C_DIM);
-            cv_text(4, MI_Y0 + 3 * MI_DY + 22, &FONT_S, "OCT+ OK   OCT- CLOSE", C_DIM);   /* (rows .. 218) */
+            if (rows <= 3u) {
+                cv_text(4, MI_Y0 + 3 * MI_DY + 6, &FONT_S, "SELECT SECTION  KNOB SETS", C_DIM);
+                cv_text(4, MI_Y0 + 3 * MI_DY + 22, &FONT_S, "OCT+ OK   OCT- CLOSE", C_DIM);
+            }
         }
         cv_oy = 0;
         cv_blit(0, H_HEAD + 1 + pass * 124u);

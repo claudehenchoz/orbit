@@ -45,7 +45,15 @@ Always use blue / green / white / orange order. The default Envelope page is A /
 
 ### Engine and Sound Selection
 
-Engine-only changes use the existing path that preserves envelope, FX and LFO. Sound preset selection uses the full sound-loading path. Do not present unsupported Shift browsing or sound slots as active controls.
+EDIT, then SAVE > PRESETS > KNOB 2 changes the engine by loading its first preset, including envelope, FX, LFO and macro defaults. Pattern and mix settings remain intact. Do not present unsupported Shift browsing or sound slots as active controls.
+
+### Drum Matrix
+
+The user's xOx reference (`x0x-4855ed23db355cb8.jpg`, supplied on 2026-10-14) defines the central display: instrument names down the left, sixteen time columns across, orange hits on black and a distinct selected instrument row. GRID is a matrix overview, not sixteen large pads for one instrument. KIT retains its live pads.
+
+On the 240x240 LCD, GRID uses a 24px compact header, sixteen 10px instrument rows and the existing four encoder controls at y=184. The matrix starts at x=24, with 13px column pitch and 11x8px cells; four-step groups remain visible. Two-letter drum labels reuse the generated FONT_S bitmap compressed vertically to 8px; no new font asset or framebuffer is allocated. Draw the 160px matrix in two 80px canvas strips.
+
+Show all sixteen ORBIT lanes, the selected row, current step cursor, transport playhead, hit levels and ratchets. The eleven black keys select voices; sixteen white keys toggle the displayed time columns. OCT changes the 16-step page. Existing orange drum tokens, neutral greys and blue/green/white/orange encoder roles remain authoritative. Keep short final pages visibly bounded and preserve the existing CPU and memory limits.
 
 ### Event Tape
 

@@ -58,31 +58,72 @@ static void pattern_rotate(track_t *t, int32_t d)       /* every step one later 
 {
     uint32_t len = trk_len(t), i;
     step_t keep;
-    layer_undo_mark(t);
+    int8_t micro;
+    uint32_t fill, shift, start, next, moved = 0;
+    d %= (int32_t)len;
+    if (!d)
+        return;
+    shift = (uint32_t)(d < 0 ? d + (int32_t)len : d);
     fm1_irq_off();
-    if (d > 0) {
-        keep = t->step[len - 1u];
-        for (i = len - 1u; i > 0; i--)
-            t->step[i] = t->step[i - 1u];
-        t->step[0] = keep;
-    } else {
-        keep = t->step[0];
-        for (i = 0; i + 1u < len; i++)
-            t->step[i] = t->step[i + 1u];
-        t->step[len - 1u] = keep;
+    layer_undo_mark(t);
+    locks_restore(t);
+    for (i = 0; i < NLOCK; i++)
+        if (t->lock[i].step < len)
+            t->lock[i].step = (uint8_t)((t->lock[i].step + shift) % len);
+    for (start = 0; moved < len; start++) {
+        keep = t->step[start];
+        micro = t->micro[start];
+        fill = step_fill(t, start);
+        i = start;
+        while ((next = (i + len - shift) % len) != start) {
+            t->step[i] = t->step[next];
+            t->micro[i] = t->micro[next];
+            step_fill_set(t, i, step_fill(t, next));
+            i = next;
+            moved++;
+        }
+        t->step[i] = keep;
+        t->micro[i] = micro;
+        step_fill_set(t, i, fill);
+        moved++;
     }
     fm1_irq_on();
 }
 static void pattern_length(track_t *t, int32_t d)       /* x2 (the pattern again after itself), or half */
 {
-    uint32_t len = trk_len(t), i;
-    layer_undo_mark(t);
+    uint32_t len = trk_len(t), i, k, need = 0;
+    if (!d || (d > 0 ? len * 2u > NSTEP : len < 2u))
+        return;
     fm1_irq_off();
-    if (d > 0 && len * 2u <= NSTEP) {
-        for (i = 0; i < len; i++)
+    if (d > 0) {
+        for (i = 0; i < NLOCK; i++) {
+            uint32_t step = t->lock[i].step;
+            if (step < len) need += 2u;
+            else if (step != LOCK_FREE && step >= len * 2u) need++;
+        }
+        if (need > NLOCK) {
+            fm1_irq_on();
+            ui_message("NO LOCK LEFT");
+            return;
+        }
+    }
+    layer_undo_mark(t);
+    locks_restore(t);
+    if (d > 0) {
+        for (i = 0; i < len; i++) {
             t->step[len + i] = t->step[i];
+            t->micro[len + i] = t->micro[i];
+            step_fill_set(t, len + i, step_fill(t, i));
+            lock_del(t, len + i, P_COUNT);
+        }
+        for (i = 0; i < NLOCK; i++)
+            if (t->lock[i].step < len) {
+                for (k = 0; t->lock[k].step != LOCK_FREE; k++) ;
+                t->lock[k] = t->lock[i];
+                t->lock[k].step += (uint8_t)len;
+            }
         t->p[P_SLEN] = (int16_t)(len * 2u);
-    } else if (d < 0 && len >= 2u) {
+    } else {
         t->p[P_SLEN] = (int16_t)(len / 2u);
     }
     fm1_irq_on();

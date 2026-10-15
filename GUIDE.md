@@ -30,9 +30,9 @@ Tracks 1/2/3 use blue/green/white; track 4 and the fourth encoder use orange. Op
 | SEL | Root/scale/chord pages | Key and chord layer |
 | ARP / SEQ / GLO | Arp / step / Mixer and global pages | Roll / step / mix layers |
 | SAVE | On Tape: SONG; on editing pages: SAVE pages | Section and song layer |
-| OCT- / OCT+ | Tape capture/drop on Tape; octave elsewhere | EDIT + OCT- undo; EDIT + OCT+ redo |
+| OCT- / OCT+ | Synth octave, including Tape; both together reset to 0. Drum GRID: previous/next step page | On Tape: SEL + OCT- capture, SEL + OCT+ drop; EDIT + OCT- undo, EDIT + OCT+ redo |
 
-Tap a page button again or turn SELECT to move through its pages. Each family remembers its last page. To reach SAVE pages from Tape, open an editing page first, then tap SAVE. A locked layer frees both hands; another page/layer button unlocks it. PLAY, REC and octave controls remain available where the layer supports them.
+Tap a page button again to cycle its pages; turn SELECT to move backward/forward within that family, stopping at its ends. Each family remembers its last page. To reach SAVE pages from Tape, open an editing page first, then tap SAVE. Drum GRID/KIT navigation is described below. A locked layer frees both hands; another page/layer button unlocks it. PLAY, REC and octave controls remain available where the layer supports them.
 
 Turning PRESETS on a synth track's Tape or Mixer **loads immediately** and opens a short list with nearby sounds. Further turns audition and extend the list. A value edit, navigation or Tape capture/drop dismisses it. Sound-design pages do not silently load sounds from PRESETS. Held-step locks keep their separate PRESETS meaning.
 
@@ -46,15 +46,15 @@ HOME remains the event editor, alternating with Visualizer. It is not the macro-
 | KNOB 2 | Region start |
 | KNOB 3 | Region end, included in the selection |
 | KNOB 4 | COPY or LIFT |
-| OCT- | Capture the selected region; LIFT also removes it |
-| OCT+ | DROP at the head, overwriting destination events |
+| SEL + OCT- | Capture the selected region; LIFT also removes it |
+| SEL + OCT+ | DROP at the head, overwriting destination events |
 | ALGORITHM | Select source/destination track |
 | SELECT | Tempo |
 | HOME | Visualizer; HOME again returns to Tape |
 
 COPY/LIFT/DROP carry chords, ties, hit levels, ratchets, nudges, fill conditions and parameter locks. A drop clips at the destination pattern end. Synth clips can move between synth tracks; drum clips only go to drums. A drop exceeding the 24-lock capacity is refused without changing the destination.
 
-The clipboard and selection are temporary. Synth Tape edits participate in EDIT + OCT- / OCT+ undo/redo. To restore a lifted drum region, drop the clipboard before copying something else. In Visualizer, OCT-/OCT+ change octave and do not alter Tape or the clipboard.
+The clipboard and selection are temporary. Note and drum DROP operations support EDIT + OCT- / OCT+ undo/redo; synth LIFT also supports it. To restore a lifted drum region, drop the clipboard before copying something else. A rejected DROP preserves the previous Undo. Plain OCT-/OCT+ change synth octave on Tape and Visualizer without altering events or the clipboard; on drums they retain ghost/hard hit levels. SEL + OCT only edits Tape, not Visualizer or other pages. Tape's idle hint shows both shortcuts and follows COPY/LIFT.
 
 ## Recording and steps
 
@@ -77,11 +77,23 @@ Every track has its own 1-64 step length and division, from 1/32 to two bars. A 
 
 Nudge is -32..31 in 1/64 of a step. There are **24 parameter locks per track**. Only supported track sound parameters are lockable; global/actions and several performance controls are excluded. A knob edit while a lock is active establishes the new base value.
 
+EDIT-layer SHIFT moves notes/hits, nudges, fill conditions and parameter locks together. LENGTH x2 copies all of these into the new half, replacing that half's old data. If the resulting pattern would require more than 24 locks, the entire operation is rejected with **NO LOCK LEFT**, preserving the pattern and previous Undo. A failed automatic lock insertion also preserves the previous Undo.
+
+While playback and **REC on the selected track** are active, changing a supported track sound parameter with a page knob (including a mapped PERFORM knob) writes its value to the currently playing step. This uses the same 24-lock table as manual step locks: another change to the same step/parameter replaces that entry; each distinct step/parameter pair uses one slot. At capacity, a new entry shows **NO LOCK LEFT** and leaves stored locks unchanged, though the live value still changes. Global controls, pattern settings, actions and macro assignments are not captured; stopped edits or REC on another track do not write locks. This is discrete step automation, not continuous full-resolution motion or audio Tape.
+
 For keyboard step entry, tap SEQ to STEP: panel or MIDI notes write the cursor's step; release all notes to advance. STEP KNOB 3 edits **LEN** when the cursor holds a note, extending it in steps; on a non-note it edits TIME. Step **VEL** is edited with SEQ + held step + KNOB 2. SELECT also reaches PATTERN and SONG. Ties and slide remain available. Undo/redo restores the last supported sequence edit, including synth nudges, fills and locks.
+
+On track 4, tap **SEQ or EDIT from Tape/Mixer** to open DRUMS. Tap SEQ/EDIT again to switch **GRID / KIT**, or turn SELECT left for GRID and right for KIT. In GRID with no layer held, the eleven black keys silently select voices, left to right: **KICK, SNARE, HAT (closed), OPEN HAT, CLAP, RIM, LOW TOM, HI TOM, CRASH, RIDE, COWBELL**. The 16 white keys toggle only the selected voice's steps on the displayed page; setting a hit auditions it. **OCT-/OCT+** move backward/forward through 16-step pages and wrap at the pattern length, preserving the local cursor where possible and clamping it on a short last page; keys beyond LENGTH do nothing. **KNOB 1** selects and auditions any of the 16 voices, including those without black-key shortcuts; **KNOB 2** moves and auditions the step cursor, **KNOB 3** sets/clears its hit and **KNOB 4** changes its level. In KIT, keys play drums live again. Holding SEQ retains its first-four-black-key page shortcuts; holding EDIT retains erase/live-mute controls.
+
+GRID shows all sixteen instrument rows against sixteen time columns, following the xOx-style matrix overview. BD/SN/CH mark kick, snare and closed hat; the selected row is highlighted. The cursor marks the edited cell, the playhead marks the sounding column, and the footer gives the absolute step number. Hit brightness shows level and small notches show ratchets. A persistent record indicator replaces the play triangle while REC is active. KIT remains the separate live-pad view.
+
+Arming REC from GRID switches the keys to live recording while the REC/free-take screen is shown; they do not edit GRID steps underneath that screen. In GRID, simultaneous black/white input selects the voice before entering steps, while repeated step presses remain separate toggles. White-key and KNOB 3 deletion both clear nudge, fill and locks when the last hit is removed.
+
+Mixer and KIT knobs are live controls, not automatic sound-parameter recording; their recording header says **NO AUTO**. Global and PATTERN pages also show **NO AUTO** while recording. FX headers distinguish **TRACK** settings from **ALL** (shared delay/reverb) settings. Unsupported drum sound pages explain the route back through HOME to DRUMS editing.
 
 ## Sounds and voice limits
 
-The default build has **17 engines and 189 factory sounds**. The first twelve sounds remain ORBIT's SWARM/PULSE/FM4 presets; CLOUD's eight sounds are appended. Occupied USER slots follow the factory bank. Engine-only selection (SAVE > PRESETS, KNOB 2) preserves envelope/effects/LFO; choosing a sound loads its sound settings and resets macro assignments to that sound's defaults.
+The default build has **17 engines and 189 factory sounds**. The first twelve sounds remain ORBIT's SWARM/PULSE/FM4 presets; CLOUD's eight sounds are appended. Occupied USER slots follow the factory bank. To change a loaded sound's engine, open EDIT, tap SAVE for PRESETS, then turn KNOB 2. This loads the new engine's first preset, including its envelope, effects, LFO and default macro assignments; the track's pattern and mix settings stay intact. Choosing a sound also loads its sound settings and resets macro assignments to that sound's defaults.
 
 | Engine | Character |
 | --- | --- |
@@ -119,7 +131,7 @@ FM6's operator envelopes belong to the patch. Store edited DX7/FM6 patches into 
 | LFO 2 | SYNC | TRIG | POL | Unused |
 | LFO DEST | PIT | FLT | SHP | AMP |
 
-Wide numeric ENV/LFO controls traverse their range faster than other page knobs; named choices still move by choice. **ENV SYNC** changes attack/decay/release displays to note values; sustain stays a level. **LFO SYNC** overrides RATE with a tempo division. TRIG NOTE restarts a fresh phrase at PHS, while FREE continues; POL BI is bipolar, UNI one-sided.
+Wide numeric ENV/LFO controls move **one value index per slow detent**; fast turns accelerate (12 indices per detent for the 0-127 and -64..63 ranges), clamped at the range ends. Named choices still move one choice per detent. **ENV SYNC** changes attack/decay/release displays to note values; sustain stays a level. **LFO SYNC** overrides RATE with a tempo division. TRIG NOTE restarts a fresh phrase at PHS, while FREE continues; POL BI is bipolar, UNI one-sided.
 
 A moving LFO with all destination depths at zero does not change the sound. For a first test, set LFO DEST AMP to about half, then adjust source RATE/WAVE. FLT/SHP address the engine's modulation paths, not an arbitrary matrix of every knob.
 

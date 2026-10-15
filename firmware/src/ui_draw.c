@@ -55,6 +55,7 @@ static void draw_battery(int usb_label)
 static void draw_head(void)
 {
     char b[16];
+    const page_t *pg = cur_page();
     uint32_t i;
     int32_t x;
     uint32_t rec = (song.rec >> song.sel) & 1u ? 2u : song.rec != 0u;   /* 2 the selected track armed, 1 another */
@@ -87,6 +88,10 @@ static void draw_head(void)
     x = cv_text(x, 1, &FONT_S, b, ui.bpm_t ? C_WHITE : C_HI);   /* white while SELECT turns it */
     if (mlu.on) {                                     /* MIDI LEARN on (2.6, GLO + F#3): in the octave's place */
         cv_text(x + 12, 1, &FONT_S, "LEARN", C_AMB);
+    } else if (song.playing && rec == 2u && (pg->scope == SC_GLOBAL || pg->fam == FAM_SEQ || pg->graph == GR_MACROS)) {
+        cv_text(x + 12, 1, &FONT_S, "NO AUTO", C_GRAY);
+    } else if (pg->fam == FAM_FX) {
+        cv_text(x + 12, 1, &FONT_S, pg->scope == SC_GLOBAL ? "ALL" : "TRACK", C_GRAY);
     } else if (song.octave) {
         str_cpy(b, song.octave > 0 ? "+" : "", 4);
         fmt_int(b + str_len(b), song.octave);
@@ -697,7 +702,7 @@ static void draw_graph(void)
             graph_browse();
         } else graph_scope(c);
     } else if (drum_note) {                          /* a page the drum track has no use for */
-        static const char *const L[2] = {"DRUM TRACK", "SEQ  TRACKS  GLO DRUMS"};
+        static const char *const L[2] = {"HOME, EDIT: DRUMS", "GLO: GLOBALS"};
         cv_text((240 - text_w(&FONT_S, L[0])) / 2, 26, &FONT_S, L[0], C_HI);
         cv_text((240 - text_w(&FONT_S, L[1])) / 2, 52, &FONT_S, L[1], C_DIM);
     } else {
