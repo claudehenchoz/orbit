@@ -1,5 +1,74 @@
 # ORBIT validation record
 
+## ORBIT 0.7.1 release package, 2026-10-15
+
+The default pi32v2 build reports `FELUCCA ORBIT 0.7.1` and retains install
+identity `FM-1_900`, editor protocol 12, 17 engines and the existing factory
+bank/storage formats. This is a software-validated package, not a new
+physical-device installation.
+
+| Region | Used | Limit | Remaining |
+| --- | ---: | ---: | ---: |
+| App image | 563992 B | 581564 B | 17572 B |
+| RAM `.data + .bss` | 97064 B | 98304 B | 1240 B |
+| Pool | 333948 B | 344064 B | 10116 B |
+
+The app is 15768 bytes smaller than the published 0.7.0 image. Binary font
+packing and glyph sharing retain the source glyph pixels; unused code/data
+sections and shared screen-transfer setup remove a further 636 bytes from
+the preceding UI/font candidate. No sample bank, factory preset or sound
+engine was removed. RAM and pool use are unchanged, and the pool retains
+the required 8192-byte reserve.
+
+`orbit.fwsc` is 610019 bytes, SHA-256
+`842a69569eaedd0e063e8caa13e7de5f6fb0412bed5b6fccbf11ed3dbdd8c68d`.
+The app SHA-256 is
+`34612d49498fc1e14f58fde7a499e9769d789010daea807de2c2c73099e75011`.
+The package pads the fixed app slot, so its download size is unchanged.
+The source default version was changed before building; no `--release`
+identity override or metadata-only version rewrite was used.
+
+`sh tests/run_tests.sh` passes in full with the installed Homebrew LLVM
+23.1.3 sanitizer compiler and an explicit macOS SDK:
+
+```sh
+PATH="$HOME/.jieli/orbit-venv/bin:$PATH" \
+CC_UB="/opt/homebrew/opt/llvm/bin/clang -isysroot $(xcrun --show-sdk-path)" \
+sh tests/run_tests.sh
+```
+
+This covers 218 unchanged audio golden renders, zero health/voice/routing
+failures, zero host CPU budget overruns, all 35 unchanged pi32v2 static-cost
+budgets, storage/update/installer/web checks, divide-by-zero checks, the
+10-minute simulated-use soak, and ASan/UBSan stress/arena checks. The default
+Apple ASan startup issue documented below is avoided by using the working
+LLVM runtime; no test or budget is skipped or weakened.
+
+The required `python tools/orbit_check.py` run passes 29/30 cases on macOS.
+Its unchanged Linux-only IRQ initializer cannot compile on Mach-O or use
+`MAP_FIXED_NOREPLACE` there; the original test passes separately with GCC
+on Linux x86-64. The required runner's macOS exit code is therefore 1,
+not an all-green native run.
+
+`python tests/orbit_preview_test.py`, `python tests/site_test.py`,
+`node web/test_package.mjs` and `node web/test_installer.mjs` all pass.
+The real native preview produces non-silent 44100 Hz stereo audio and
+validates panel routing, scope output and invalid-input handling.
+The generated 0.7.1 installer manifest names `FM-1_900` and exactly matches
+the release package's size and hash above.
+
+Host UI regression covers the drum matrix, voice/step key routing, short
+pages, recording from GRID, step automation capacity/Undo, Tape shortcuts,
+pattern rotation/doubling metadata, SYSTEM layout and long SONG entries.
+Actual C preview captures at desktop 1440px and iPhone 390px confirm the
+0.7.1 label and drum matrix; the phone document has no horizontal overflow.
+These captures and audio checks do not establish FM-1 timing or sound quality.
+
+The previous 0.7.0 device installation and 0.6.0 USB recording remain
+historical evidence only. No 0.7.1 installation, hardware audio/timing,
+power-loss recovery, physical controller test or crackle resolution is
+claimed.
+
 ## ORBIT 0.7.0 package and device installation, 2026-10-12
 
 The 0.7.0 package was built locally and installed on an FM-1 at the user's

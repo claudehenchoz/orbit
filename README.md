@@ -4,17 +4,19 @@
 
 ORBIT is a four-track groovebox firmware for the **M-VAVE FM-1**: three synth parts and a drum machine, played through a color-coded Synth / Drum / Event Tape / Mixer workflow. Record a loop, turn it into a song, and keep your favorite sound controls together with user macros. Based on SLOOP/Felucca, with original ORBIT engines and graphics inspired by the original OP-1's four encoder roles.
 
-[Install](#install) · [Get started](GUIDE.md#get-started) · [User guide](GUIDE.md) · [MIDI controllers](docs/MIDI-CONTROL.md) · [0.7.0 release notes](docs/releases/0.7.0.md) · [Try the native preview](#try-the-native-preview)
+[Install](#install) · [Get started](GUIDE.md#get-started) · [User guide](GUIDE.md) · [MIDI controllers](docs/MIDI-CONTROL.md) · [0.7.1 release notes](docs/releases/0.7.1.md) · [Try the native preview](#try-the-native-preview)
+
+**0.7.1:** a clearer drum matrix, precise slow ENV/LFO turns, step-recorded sound controls, safer Tape/pattern edits and a smaller firmware image.
 
 ![Event Tape, synth, envelope, mixer and sampler screens](docs/orbit-preview-0.2.png)
 
-*Actual firmware UI rendered by the native host harness. These are earlier ORBIT screens, not hardware photographs or new 0.7.0 captures.*
+*Actual firmware UI rendered by the native host harness. These are earlier ORBIT screens, not hardware photographs or captures of the current release.*
 
 ## Make a loop, then move its events
 
 1. Select **track 4** with ALGORITHM and choose a drum kit with PRESETS. Press REC and play; on an empty project in free mode, press REC on the next downbeat to close the loop.
 2. Select **track 1**, choose a sound, and record a bass line. Add chords or a melody on tracks 2 and 3.
-3. Press **HOME** for Event Tape. Set the region with KNOB 2/3, choose COPY or LIFT with KNOB 4, and press OCT- to capture it. Set the destination with KNOB 1 and press OCT+ to drop it.
+3. Press **HOME** for Event Tape. Set the region with KNOB 2/3, choose COPY or LIFT with KNOB 4, and hold SEL while pressing OCT- to capture it. Set the destination with KNOB 1 and use SEL + OCT+ to drop it.
 4. Press **GLO** for Mixer to balance the four tracks. Save variations into sections A-D and play or chain them with the SAVE layer.
 
 Tape edits **sequencer events**, including notes, drum hits, timing, fills and parameter locks. It is not audio recording, PCM overdubbing or tape-speed playback. Drop overwrites destination events, so save a section before experimenting. See the [Tape controls](GUIDE.md#event-tape).
@@ -23,7 +25,7 @@ Tape edits **sequencer events**, including notes, drum hits, timing, fills and p
 
 - **Event Tape:** a four-track event timeline with reels, an inclusive selection and COPY / LIFT / DROP, alongside the step sequencer.
 - **Original sounds:** SWARM's six detuned harmonic oscillators, PULSE's dual pulse/PWM synthesis, FM4's four sine operators, and **CLOUD**, an oscillator-source granular engine. CLOUD makes grains from oscillators; **GRAIN** makes grains from samples.
-- **Controls that follow the sound:** four blue / green / white / orange encoders, faster travel through wide ENV/LFO ranges, and an instant preset list that auditions each selection on Tape or Mixer.
+- **Controls that follow the sound:** four blue / green / white / orange encoders, one-index slow detents and accelerated fast turns through wide numeric ENV/LFO ranges, and an instant preset list that auditions each selection on Tape or Mixer.
 - **User macros:** assign four destinations on **MACROS**, edit their values on **PERFORM** through EDIT/SELECT, and save the map with a USER sound or project. HOME remains Tape / Visualizer.
 - **A real-firmware preview:** the native preview runs ORBIT's C sound engine, sequencer and display rather than a separate browser synth.
 
@@ -58,7 +60,7 @@ The browser installation address is **[dspaudio.github.io/orbit](https://dspaudi
 
 The site downloads the latest stable release automatically and validates its package before enabling **Connect**. Use Chrome or Edge, a USB data cable and a direct connection. Connect grants Web MIDI SysEx access; **Install** is a separate action after device preflight. Keep power and USB connected during the write. If the download fails, retry it; the page does not accept a local package picker.
 
-**BACKUP before every update.** Stop playback and use the editor's Projects / Backup export. ORBIT 0.7.0 writes **ORP7 projects and OPB2 preset banks**; it imports legacy ORBIT formats, but raw SLOOP 2.6 **FUN6 is rejected**. Older firmware cannot read new saves, and its autosave may overwrite them. Keep a pre-update backup for a downgrade. See [storage and recovery](GUIDE.md#backup-updates-and-downgrades).
+**BACKUP before every update.** Stop playback and use the editor's Projects / Backup export. ORBIT 0.7.1 keeps 0.7.0's **ORP7 projects and OPB2 preset banks**; it imports legacy ORBIT formats, but raw SLOOP 2.6 **FUN6 is rejected**. Firmware older than 0.7.0 cannot read these saves, and its autosave may overwrite them. Keep a pre-update backup for a downgrade. See [storage and recovery](GUIDE.md#backup-updates-and-downgrades).
 
 Local fallback for a verified package:
 
@@ -68,9 +70,9 @@ python3 tools/fm1_install.py --info
 python3 tools/fm1_install.py build/orbit.fwsc
 ```
 
-The release target is **0.7.0**, install identity **FM-1_900**. Build with the default command, **not --release**. See [BUILDING.md](BUILDING.md) for the toolchain, local site generation and CLI instructions. Generated firmware packages are not committed to this tree.
+The release target is **0.7.1**, install identity **FM-1_900**. Build with the default command, **not --release**. See [BUILDING.md](BUILDING.md) for the toolchain, local site generation and CLI instructions. Generated firmware packages are not committed to this tree.
 
-**Validation:** 0.7.0 was installed on an FM-1, with transfer completion, automatic reboot and actual version/PING responses verified. The earlier short USB recording of **0.6.0 on 2026-10-10 is historical**, not 0.7.0 audio evidence. 0.7.0 hardware timing, power-loss recovery and physical crackle resolution have not been verified. Measurements and release gates belong in the [validation record](docs/VALIDATION.md), not a product promise.
+**Validation:** 0.7.1 is software-tested; it has not been installed or tested on an FM-1. The 0.7.0 installation/version/PING checks and the short USB recording of **0.6.0 on 2026-10-10 are historical**, not 0.7.1 hardware evidence. Hardware timing, power-loss recovery and physical crackle resolution remain unverified. Measurements and release gates belong in the [validation record](docs/VALIDATION.md), not a product promise.
 
 ## Try the native preview
 
@@ -88,8 +90,8 @@ Open http://127.0.0.1:8080 and press **Start audio**. The preview includes its o
 - [GUIDE.md](GUIDE.md): panel workflow, recording, Event Tape, sound design, macros and saving.
 - [MIDI control](docs/MIDI-CONTROL.md): channels, CC learn, MiniLab routing and controller limits.
 - [BUILDING.md](BUILDING.md): build, local installer site and checks.
-- [0.7.0 release notes](docs/releases/0.7.0.md) and [validation record](docs/VALIDATION.md).
-- Earlier releases: [0.6.0](docs/releases/0.6.0.md), [0.5.0](docs/releases/0.5.0.md), [0.4.1](docs/releases/0.4.1.md); [SLOOP 2.5 integration](docs/SLOOP-2.5-INTEGRATION.md).
+- [0.7.1 release notes](docs/releases/0.7.1.md) and [validation record](docs/VALIDATION.md).
+- Earlier releases: [0.7.0](docs/releases/0.7.0.md), [0.6.0](docs/releases/0.6.0.md), [0.5.0](docs/releases/0.5.0.md), [0.4.1](docs/releases/0.4.1.md); [SLOOP 2.5 integration](docs/SLOOP-2.5-INTEGRATION.md).
 - [Original ORBIT engines](docs/OP1-ENGINES.md), [CLUSTER](docs/OP1-CLUSTER.md), [design](DESIGN.md), [editor protocol](web/EDITOR_PROTOCOL.md) and [Dots](DOTS.md).
 
 ## Origin, credits and licensing

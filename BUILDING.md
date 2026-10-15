@@ -1,6 +1,6 @@
 # Building ORBIT
 
-The current release target is **ORBIT 0.7.0**, with CLOUD, user macros and the functional SLOOP v2.6 port. Device builds require the pi32v2 toolchain and AC79 SDK. The [validation record](docs/VALIDATION.md) owns final package measurements and distinguishes software checks from hardware evidence. Generated packages are not committed to the repository.
+The current release target is **ORBIT 0.7.1**, with drum-matrix/control fixes and lossless firmware-size reductions on the 0.7.0 feature set. Device builds require the pi32v2 toolchain and AC79 SDK. The [validation record](docs/VALIDATION.md) owns final package measurements and distinguishes software checks from hardware evidence. Generated packages are not committed to the repository.
 
 The build produces these artifacts in `build/`:
 
@@ -50,8 +50,8 @@ sh build.sh
 `JIELI_TOOLCHAIN` and `AC79_SDK` override the default locations
 (`~/.jieli/toolchain`, `~/fw-AC79_AIoT_SDK`).
 
-Build the 0.7.0 package with `PYTHON=~/.jieli/orbit-venv/bin/python sh build.sh`.
-The default source version is `ORBIT 0.7.0`, and the install identity remains
+Build the 0.7.1 package with `PYTHON=~/.jieli/orbit-venv/bin/python sh build.sh`.
+The default source version is `ORBIT 0.7.1`, and the install identity remains
 `FM-1_900`. **Do not use `--release` for this release:** it changes both the
 product identity and displayed version using upstream's single-digit `X.Y`
 scheme. A three-part ORBIT version is not that scheme. Confirm the actual
@@ -100,9 +100,9 @@ the hashes; `BUDGET_UPDATE=1` does the same for the cost files.
 ## Install
 
 **BACKUP before updates or downgrades.** Stop playback and export Projects /
-Backup from the editor. ORBIT 0.7.0 writes ORP7 projects and OPB2 preset banks;
-legacy ORBIT files can be imported, but raw SLOOP FUN6 is rejected. Older
-firmware cannot read new saves and may overwrite them through autosave.
+Backup from the editor. ORBIT 0.7.1 retains 0.7.0's ORP7 projects and OPB2 preset banks;
+legacy ORBIT files can be imported, but raw SLOOP FUN6 is rejected. Firmware
+older than 0.7.0 cannot read these saves and may overwrite them through autosave.
 Keep a pre-update backup for returning to the matching old firmware. See
 [the user guide](GUIDE.md#backup-updates-and-downgrades).
 
@@ -112,7 +112,7 @@ The page downloads the latest published stable package, verifies
 its size, SHA-256, identity, loader marker and CRCs, then enables Connect.
 Connect requests Web MIDI SysEx permission; Install is separately enabled after
 device identity preflight. A failed download offers Retry download, not a file
-picker. Check the displayed version; an older published release is not 0.7.0.
+picker. Check the displayed version; an older published release is not 0.7.1.
 
 Use Chrome or Edge, a USB data cable and a direct connection. Keep power and USB
 connected until the write and reboot finish. On Windows, use WSL for the
@@ -130,15 +130,16 @@ reads identity; the package argument starts the install workflow. The installer
 checks the FM-1 identity and package before writing. Neither the CLI nor a
 successful simulated installer test proves physical recovery after a power cut.
 The 0.7.0 installation, reboot, actual version and PING were verified on an FM-1.
-Historical 0.6.0 audio checks are not 0.7.0 audio checks.
+Those checks and the historical 0.6.0 audio checks are not 0.7.1 hardware evidence;
+0.7.1 has not been installed or tested on a physical device.
 
 ## Build and serve the installer site locally
 
-After building and checking the actual 0.7.0 package:
+After building and checking the actual 0.7.1 package:
 
 ```sh
-python3 tools/make_site.py --package build/orbit.fwsc --version 0.7.0 --out build/site \
-  --release-url https://github.com/dspaudio/orbit/releases/tag/v0.7.0
+python3 tools/make_site.py --package build/orbit.fwsc --version 0.7.1 --out build/site \
+  --release-url https://github.com/dspaudio/orbit/releases/tag/v0.7.1
 python3 -m http.server 8766 --bind 127.0.0.1 --directory build/site
 ```
 
@@ -169,7 +170,7 @@ It selects the latest published release, downloads `orbit.fwsc` and `SHA256SUMS`
 checks the checksum, generates/tests the site, then uploads a Pages artifact.
 Repository Pages must use **GitHub Actions** as its source. This describes the
 publication workflow, not a claim that it has run. Do not label a 0.6.0 package
-as 0.7.0 by changing only manifest metadata.
+as 0.7.1 by changing only manifest metadata.
 
 Installing firmware is at your own risk. If an install fails and the FM-1 no longer
 starts, recovery needs [FM-1-transporter](https://github.com/kurogedelic/FM-1-transporter).
