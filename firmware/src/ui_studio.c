@@ -273,9 +273,9 @@ static void swing_str(char *b, int32_t v)
 /* ---------------------------------------------------------------- DRUMS --- */
 static const char *const LV_NAME[4] = {"norm", "ghost", "soft", "hard"};
 static uint32_t lvl_rank(uint32_t lvl);                 /* (below) ghost 0, soft 1, norm 2, hard 3 */
-static uint16_t lvl_col(uint32_t lvl)                   /* a hit's colour by its level */
+static uint16_t lvl_col(uint32_t f, uint32_t lvl)       /* a hit's colour by its level, in its family's colour f */
 {
-    return lvl == LV_GHOST ? TE_DIM[3] : lvl == LV_SOFT ? TE_MID[3] : lvl == LV_HARD ? C_WHITE : TE_DRUM;
+    return lvl == LV_GHOST || lvl == LV_SOFT ? TE_MID[f & 3u] : TE_COL[f & 3u];   /* (GHOST, SOFT: their size tells) */
 }
 static uint16_t pad_lit[DRUM_LANES];                   /* pads and key LEDs: frames left lit */
 static uint8_t key_lit[27];                             /* menu NOTES, a synth track: frames its key stays lit */
@@ -323,6 +323,21 @@ static const char GRID_LABEL[DRUM_LANES][3] = {
     "BD", "B2", "SN", "CP", "CH", "OH", "PD", "RS",
     "S2", "LT", "HT", "CR", "RD", "SH", "CG", "CB"
 };
+/* GRID: each sound in its family's colour, the OP-1's four: kicks blue, snares and claps green, hats and
+ * cymbals white, toms and percussion red; a groove reads at a glance */
+static const uint8_t DRUM_FAM[DRUM_LANES] = {0, 0, 1, 1, 2, 2, 2, 1, 1, 3, 3, 2, 2, 2, 3, 3};
+/* a hit at x, y (11 x 8): a dot, as large as it is loud (GHOST 3.5 px across .. HARD 9), its ratchets as many
+ * dots side by side; white as the playhead plays it */
+static void drum_cell(int32_t x, int32_t y, uint32_t f, uint32_t lvl, uint32_t rat, int playing)
+{
+    uint16_t c = playing ? C_WHITE : lvl_col(f, lvl);
+    int32_t rad = lvl == LV_GHOST ? 28 : lvl == LV_SOFT ? 40 : lvl == LV_NORM ? 54 : 72;   /* 1/16 px: 3.5 .. 9 px across */
+    int32_t i, n = rat ? (int32_t)rat : 1, room = 11 * 16 / (2 * n) - 6;
+    if (rad > room)
+        rad = room;                                 /* x2..x4: as many dots side by side */
+    for (i = 0; i < n; i++)
+        cv_disc_q4(x * 16 + (2 * i + 1) * 11 * 16 / (2 * n), (y + 4) * 16, rad, c);
+}
 static void drum_screen_draw(void)
 {
     static uint32_t head, title_sig, body_sig, footer;
@@ -369,30 +384,33 @@ static void drum_screen_draw(void)
         body_sig = sig;
         if (!drum_page) {                              /* GRID: instruments down, sixteen time columns across */
             uint32_t pass, j;
+            int32_t ph = song.playing && TDRUM->seq_idx / 16u == bank ? (int32_t)(TDRUM->seq_idx % 16u) : -1;
             for (pass = 0; pass < 2u; pass++) {
                 cv_begin(240, 80, C_BLACK);
                 cv_oy = -(int32_t)(pass * 80u);
+                if (ph >= 0)                           /* the playhead: its column lit */
+                    cv_rect(23 + ph * 13, 0, 13, 160, TE_G1);
                 for (i = 0; i < DRUM_LANES; i++) {
                     int32_t y = (int32_t)i * 10;
-                    cv_rect(0, y, 20, 9, i == drum_lane ? TE_DRUM : C_BLACK);
-                    drum_row_text(0, 20, y, GRID_LABEL[i], i == drum_lane ? C_BLACK : TE_G4);
+                    uint32_t f = DRUM_FAM[i];
+                    if (i == drum_lane) {              /* the lane the white keys write: a band, its name a chip */
+                        cv_rect(22, y - 1, 210, 10, TE_G1);
+                        if (ph >= 0)
+                            cv_rect(23 + ph * 13, y - 1, 13, 10, TE_G2);
+                        cv_rect(0, y - 1, 20, 10, TE_COL[f]);
+                    }
+                    drum_row_text(0, 20, y, GRID_LABEL[i], i == drum_lane ? C_BLACK : pad_lit[i] ? TE_COL[f] : TE_G3);
                     for (j = 0; j < 16u; j++) {
-                        uint32_t p = bank * 16u + j, on, r;
+                        uint32_t p = bank * 16u + j;
                         const dstep_t *s = &TDRUM->dstep[p];
                         int32_t x = 24 + (int32_t)j * 13;
                         if (p >= len) continue;
-                        on = dstep_has(s, i);
-                        cv_rect(x, y, 11, 8, on ? lvl_col(dstep_lvl(s, i)) : i == drum_lane ? TE_G2 : TE_G1);
-                        if (!(j & 3u)) cv_rect(x - 2, y, 1, 8, TE_G3);
-                        if (on)
-                            for (r = 0; r < dstep_rat(s, i); r++)
-                                cv_rect(x + 2 + (int32_t)r * 3, y + 3, 1, 1, C_BLACK);
-                        if (p == drum_cursor && i == drum_lane) {
-                            cv_rect(x, y, 11, 1, C_WHITE);
-                            cv_rect(x, y + 7, 11, 1, C_WHITE);
-                        }
-                        if (song.playing && p == TDRUM->seq_idx)
-                            cv_rect(x + 3, y + 5, 5, 2, on && dstep_lvl(s, i) != LV_GHOST ? C_BLACK : C_WHITE);
+                        if (dstep_has(s, i))
+                            drum_cell(x, y, f, dstep_lvl(s, i), dstep_rat(s, i), (int32_t)j == ph);
+                        else                           /* an empty step: a dot, brighter on the beat and in the lane */
+                            cv_rect(x + 5, y + 3, 1, 1, i == drum_lane || !(j & 3u) ? TE_G3 : TE_G2);
+                        if (p == drum_cursor && i == drum_lane)
+                            te_box(x - 1, y - 1, 13, 10, C_WHITE, 0);
                     }
                 }
                 cv_oy = 0;

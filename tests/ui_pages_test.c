@@ -983,19 +983,21 @@ int main(int argc, char **argv)
                 }
                 drum_lane = 2; drum_cursor = 2; TDRUM->p[P_SLEN] = 64; TDRUM->seq_idx = 4;
                 ui.force = 1; ui_draw(); ppm("grid-sn-playhead-hit");
-                check(swap16(screen[(24u + 2u * 10u + 5u) * 240u + 24u + 4u * 13u + 3u]) == C_BLACK,
-                      "grid: playhead stays visible on a white HARD hit");
+                check(swap16(screen[(24u + 2u * 10u + 3u) * 240u + 24u + 4u * 13u + 5u]) == C_WHITE,
+                      "grid: playhead visible on a HARD hit (it flashes white as it plays)");
                 TDRUM->seq_idx = 1; ui.force = 1; ui_draw();
-                check(swap16(screen[(24u + 2u * 10u + 5u) * 240u + 24u + 13u + 3u]) == C_WHITE,
-                      "grid: playhead stays visible on an empty step");
-                {
+                check(swap16(screen[(24u + 2u * 10u + 1u) * 240u + 24u + 13u + 1u]) == TE_G2 &&
+                      swap16(screen[(24u + 7u * 10u + 1u) * 240u + 24u + 13u + 1u]) == TE_G1,
+                      "grid: playhead visible on an empty step (its column lit)");
+                {   /* the middle of each cell: the hit in its family's colour by level (white under the playhead),
+                     * else the dot of an empty step */
                     uint32_t row, col, ok = 1;
                     for (row = 0; row < DRUM_LANES; row++)
                         for (col = 0; col < 16u; col++) {
                             const dstep_t *s = &TDRUM->dstep[col];
-                            uint16_t want = dstep_has(s, row) ? lvl_col(dstep_lvl(s, row)) :
-                                            row == drum_lane ? TE_G2 : TE_G1;
-                            ok &= swap16(screen[(24u + row * 10u + 2u) * 240u + 24u + col * 13u + 1u]) == want;
+                            uint16_t want = dstep_has(s, row) ? (col == 1u ? C_WHITE : lvl_col(DRUM_FAM[row], dstep_lvl(s, row))) :
+                                            row == drum_lane || !(col & 3u) ? TE_G3 : TE_G2;
+                            ok &= swap16(screen[(24u + row * 10u + 3u) * 240u + 24u + col * 13u + 5u]) == want;
                         }
                     check(ok, "grid: all sixteen instrument rows and sixteen time columns show their own hits");
                 }
