@@ -200,6 +200,148 @@ static void graph_slicer(const track_t *t, uint16_t c)
             cv_rect(x, 85, 11, 3, C_WHITE);
     }
 }
+
+/* ARP page, as the OP-1's: the arp's run (seq.c arp_run) as notes on a staff, in the order it plays them, so
+ * UP climbs, DOWN falls, OCT stretches it; the note playing lit in the track's colour, standing up and popping,
+ * the notes just played glowing away (RANDOM: where it jumped); GATE as the bars under them; the note's name
+ * large, the place in the run, HOLD when latched. av: what the page saw of the arp (arp_watch, every frame) */
+#define ARP_TRAIL_MS 600u
+#define ARP_POP_MS 320u
+static struct {
+    uint8_t list[64], glow[64], len, j, fired, trk, has, on;
+    uint32_t fire_ms, seen_ms;
+} av;
+static uint32_t arp_watch(const track_t *t)
+{
+    uint32_t list[64], i, len, ti = trk_index(t) % NTRK, now = fm1_ms, dec, h = 2166136261u;
+    uint8_t fired, j;
+    fm1_irq_off();                                  /* (the arp plays in the audio interrupt) */
+    len = t->p[P_AMODE] ? arp_run(t, list) : 0u;
+    j = arp_j[ti];
+    fired = arp_fired[ti];
+    av.on = t->arp_note != 0;
+    fm1_irq_on();
+    dec = (now - av.seen_ms) * 255u / ARP_TRAIL_MS;
+    av.seen_ms = now;
+    for (i = 0; i < 64u; i++)
+        av.glow[i] = (uint8_t)(av.glow[i] > dec ? av.glow[i] - dec : 0u);
+    if (ti != av.trk || !len) {                     /* another track, or nothing held: a fresh page */
+        av.trk = (uint8_t)ti;
+        av.has = 0;
+        for (i = 0; i < 64u; i++)
+            av.glow[i] = 0;
+    } else if (fired != av.fired && j < len) {      /* a note played */
+        av.j = j;
+        av.has = 1;
+        av.glow[j] = 255;
+        av.fire_ms = now;
+    }
+    av.fired = fired;
+    av.len = (uint8_t)len;
+    for (i = 0; i < len; i++) {
+        av.list[i] = (uint8_t)list[i];
+        h = (h ^ list[i] ^ (uint32_t)av.glow[i] << 8) * 16777619u;
+    }
+    if (av.has && now - av.fire_ms < ARP_POP_MS)
+        h ^= now * 2654435761u;                     /* the pop: every frame */
+    return h ^ (uint32_t)av.j * 131u ^ (uint32_t)av.on * 7919u ^ (uint32_t)av.has * 104729u;
+}
+
+/* a note head as the OP-1 draws one: an ellipse tilted up to the right, filled or a 1.25 px outline; centre
+ * and half axes in 1/16 px */
+static void note_head(int32_t cx, int32_t cy, int32_t a, int32_t b, int fill, uint16_t c)
+{
+    int32_t r = (a + 24) >> 4, rm = (a + b) / 2, x, y;
+    for (y = (cy >> 4) - r; y <= (cy >> 4) + r; y++)
+        for (x = (cx >> 4) - r; x <= (cx >> 4) + r; x++) {
+            int32_t qx = x * 16 + 8 - cx, qy = y * 16 + 8 - cy;
+            int32_t u = (qx * 15 - qy * 6) / 16, v = (qx * 6 + qy * 15) / 16;   /* turned 22 degrees */
+            int32_t uu = u * 256 / a, vv = v * 256 / b;
+            int32_t d = ((int32_t)gfx_isqrt((uint32_t)(uu * uu + vv * vv)) - 256) * rm / 256;   /* to the edge */
+            cv_blend(x, y, c, fill ? cov_of(d, 0) : cov_of(d < 0 ? -d : d, 10));
+        }
+}
+
+static void graph_arp(const track_t *t, uint16_t c)
+{
+    static const uint8_t LET[12] = {0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6}, SH[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
+    int32_t n = av.len, i, k, dmin = 41, dmax = 41, mid, off, u, w, x0, s, a, b, cy = 68 * 16;
+    uint32_t pop = fm1_ms - av.fire_ms, gate = (uint32_t)t->p[P_AGATE];
+    char nm[8];
+    for (i = 0; i < n; i++) {                       /* the staff's place: the treble's, octaves away to the run */
+        int32_t d = av.list[i] / 12 * 7 + LET[av.list[i] % 12u];
+        if (!i || d < dmin)
+            dmin = d;
+        if (!i || d > dmax)
+            dmax = d;
+    }
+    mid = 41 + 7 * (((dmin + dmax) / 2 - 41 + 3 + 70) / 7 - 10);   /* (41: B4, the middle line) */
+    off = dmax - mid > mid - dmin ? dmax - mid : mid - dmin;
+    u = off > 6 ? 36 * 16 / off : 5 * 16;           /* half a line space, 1/16 px: the run within 36 px of the middle */
+    for (k = -2; k <= 2; k++)
+        cv_rect(6, (cy + 2 * k * u) >> 4, 228, 1, t->p[P_AMODE] ? TE_G2 : TE_G1);
+    if (!n) {
+        if (t->p[P_AMODE])
+            te_text_c(120, 98, "HOLD SOME KEYS", TE_G3);
+        return;
+    }
+    w = 220 / n < 28 ? 220 / n : 28;
+    x0 = (240 - n * w) / 2 + w / 2;
+    s = w >= 18 ? 16 : w * 16 / 18 > 8 ? w * 16 / 18 : 8;   /* the heads' size, 1/16 */
+    for (i = 0; i < n; i++) {
+        int32_t note = av.list[i], d = note / 12 * 7 + LET[note % 12], x = (x0 + i * w) * 16 + 8, y = cy - (d - mid) * u;
+        int cur = av.has && i == av.j;
+        uint32_t g = av.glow[i];
+        uint16_t col = cur && av.on ? c : g ? color_scale(c, 70u + g * 185u / 255u) : TE_G3;
+        a = 70 * s / 16;
+        b = 50 * s / 16;
+        if (cur && pop < ARP_POP_MS / 2u) {         /* the pop: half as big again, settling */
+            a += a * (int32_t)(ARP_POP_MS / 2u - pop) / (int32_t)ARP_POP_MS;
+            b += b * (int32_t)(ARP_POP_MS / 2u - pop) / (int32_t)ARP_POP_MS;
+        }
+        for (k = mid + 6; k <= d; k += 2)           /* ledger lines, above the staff and below */
+            cv_rect((x - a) / 16 - 3, (cy - (k - mid) * u) >> 4, 2 * a / 16 + 7, 1, TE_G2);
+        for (k = mid - 6; k >= d; k -= 2)
+            cv_rect((x - a) / 16 - 3, (cy - (k - mid) * u) >> 4, 2 * a / 16 + 7, 1, TE_G2);
+        if (SH[note % 12] && w >= 14) {             /* its sharp */
+            int32_t sx = (x - a) / 16 - 8, sy = y >> 4;
+            cv_rect(sx + 1, sy - 4, 1, 8, col);
+            cv_rect(sx + 3, sy - 4, 1, 8, col);
+            cv_rect(sx, sy - 2, 5, 1, col);
+            cv_rect(sx, sy + 1, 5, 1, col);
+        }
+        if (cur && pop < ARP_POP_MS)                /* the ripple */
+            cv_ring_q4(x, y, a + (int32_t)pop * 14 * 16 / (int32_t)ARP_POP_MS, 16,
+                       color_scale(c, 255u - pop * 255u / ARP_POP_MS));
+        note_head(x, y, a, b, cur || g, col);
+        if (w >= 12)                                /* its stem: the one playing stands up in colour */
+            cv_rect((x + a * 15 / 16) / 16 - 1, (y >> 4) - 22 * s / 16, 1, 22 * s / 16 - 1, cur && av.on ? c : TE_G2);
+        cv_rect(x / 16 - (w - 3) / 2, 110, (int32_t)((uint32_t)(w - 3) * gate / 127u) > 0 ? (int32_t)((uint32_t)(w - 3) * gate / 127u) : 1,
+                2, cur && av.on ? c : TE_G2);       /* GATE: how much of its step it sounds */
+    }
+    if (av.has) {                                   /* the note's name, large; grey between notes */
+        note_name(nm, av.list[av.j < n ? av.j : 0]);
+        cv_text(8, -4, &FONT_L, nm, av.on ? c : TE_G3);
+    }
+    if (n <= 16) {                                  /* where in the run: a dot a note */
+        for (i = 0; i < n; i++)
+            cv_disc_q4((232 - (n - 1 - i) * 7) * 16 + 8, 8 * 16 + 8, 36, av.has && i == av.j ? C_WHITE : TE_G2);
+        k = 232 - (n - 1) * 7 - 8;
+    } else {
+        char p[12];
+        fmt_int(p, av.has ? av.j + 1 : 0);
+        str_cpy(p + str_len(p), "/", 2);
+        fmt_int(p + str_len(p), n);
+        k = 234 - text_w(&FONT_S, p);
+        cv_text(k, 0, &FONT_S, p, TE_G3);
+        k -= 6;
+    }
+    if (t->p[P_AHOLD]) {                            /* latched: left of where it is */
+        te_box(k - 40, 1, 40, 15, te_alert, 0);
+        te_text_c(k - 20, 1, "HOLD", te_alert);
+    }
+}
+
 static uint32_t steps_hash(const track_t *t)
 {
     uint32_t h = 2166136261u, i;
@@ -236,6 +378,8 @@ static uint32_t graph_signature(void)
     for (i = 0; i < P_COUNT; i++)
         h = (h ^ (uint32_t)t->p[i]) * 16777619u;
     h ^= (uint32_t)TSEL->preset * 7u + (uint32_t)song.g[G_SLOT] * 13u + TSEL->user * 257u + up_gen * 7919u + ui.uslot * 104729u;
+    if (pg->graph == GR_ARP && !is_drum(t))          /* the arp's run, the note playing, the trail and pop */
+        h ^= arp_watch(t);
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
         h ^= (sl[song.sel].idx + 1u) * 2654435761u;
     if (pg->graph == GR_SLOTS)                       /* (a checksum over each slot) */
@@ -446,6 +590,9 @@ static void draw_graph(void)
         case GR_USER:
             cv_oy = 0;
             graph_user();
+            break;
+        case GR_ARP:
+            graph_arp(t, c);
             break;
         case GR_MACROS:                              /* (the strip names the four; what is left: how to keep them) */
             te_text_c(120, 40, "PERFORM / USER: SAVE", C_DIM);

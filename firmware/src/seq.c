@@ -1076,10 +1076,13 @@ static void arp_remove(track_t *t, uint32_t note)
     t->nheld = (uint8_t)k;
 }
 
-/* the next note of the arp: the held notes (sorted or as played) over OCT octaves, by MODE */
-static uint32_t arp_next(track_t *t)
+/* the arp's run as it plays now: the held notes (sorted or as played) over OCT octaves; its length (the ARP page
+ * draws it: ui_draw.c graph_arp). arp_j: the place in it of the note last played, arp_fired: notes played (each
+ * track: the page's pop and trail) */
+static uint8_t arp_j[NTRK], arp_fired[NTRK];
+static uint32_t arp_run(const track_t *t, uint32_t *list)
 {
-    uint32_t cnt = 0, list[64], len = 0, i, j, o, ti = trk_index(t);
+    uint32_t cnt = 0, len = 0, i, j, o, ti = trk_index(t);
     for (i = 0; i < t->nheld; i++) {               /* the notes as they play now (#191), each held note once: a note
                                                      * two chords share plays in each (the run is as long as the keys say) */
         uint32_t x = t->held[i], s = held_key[ti][i];
@@ -1092,7 +1095,7 @@ static uint32_t arp_next(track_t *t)
         list[cnt++] = x;
     }
     if (!cnt)
-        return KB_SILENT;                           /* (every key silent now: a black key under WHITE since) */
+        return 0;
     if (!t->p[P_AORDER])
         for (i = 1; i < cnt; i++)
             for (j = i; j > 0 && list[j - 1] > list[j]; j--) {
@@ -1103,6 +1106,15 @@ static uint32_t arp_next(track_t *t)
     for (o = 0; o < (uint32_t)t->p[P_AOCT]; o++)
         for (i = 0; i < cnt && len < 64u; i++)
             list[len++] = (uint32_t)clamp((int32_t)list[i] + 12 * (int32_t)o, 0, 127);
+    return len;
+}
+
+/* the next note of the arp: its run (arp_run) by MODE */
+static uint32_t arp_next(track_t *t)
+{
+    uint32_t list[64], len = arp_run(t, list), j;
+    if (!len)
+        return KB_SILENT;                           /* (every key silent now: a black key under WHITE since) */
     t->arp_idx++;
     switch (t->p[P_AMODE]) {
     case 2:
@@ -1120,6 +1132,7 @@ static uint32_t arp_next(track_t *t)
         j = t->arp_idx % len;
         break;
     }
+    arp_j[trk_index(t) % NTRK] = (uint8_t)j;
     return list[j];
 }
 
@@ -1184,6 +1197,7 @@ static void arp_tick(track_t *t, uint32_t adv)
         if (n == KB_SILENT)
             return;
         t->arp_note = (uint8_t)n;
+        arp_fired[trk_index(t) % NTRK]++;
         t->arp_off = slen * (uint32_t)t->p[P_AGATE] / 128u;
         trk_note_on(t, n, 100);
         seq_out_on(t, n, 100);

@@ -165,6 +165,24 @@ int main(int argc, char **argv)
     open_family(FAM_GLO); ui.force = 1; frame(); ppm("page-global");
     open_family(FAM_GLO); ui.force = 1; frame(); ppm("page-master");
     open_family(FAM_SCL); ui.force = 1; frame(); ppm("page-scale");
+    {   /* ARP: the run on a staff, the note playing lit in the track's colour; TRIAD C then E held: six notes */
+        uint32_t x, y, lit = 0;
+        int16_t sc = TSEL->p[P_SCALE], ch = TSEL->p[P_CHORD];
+        open_family(FAM_ARP); ui.force = 1; frame();
+        TSEL->p[P_AMODE] = 1; TSEL->p[P_AOCT] = 1; TSEL->p[P_SCALE] = 1; TSEL->p[P_CHORD] = 1;
+        fm1_in.notes = 1u << 7; frames(2);
+        fm1_in.notes = 1u << 7 | 1u << 11; frames(8);
+        ppm("page-arp");
+        for (y = 80; y < 170; y++)
+            for (x = 0; x < 240; x++)
+                lit += screen[y * 240u + x] == swap16(TE_COL[song.sel & 3u]);
+        check(av.len == 6u && av.has && av.list[1] == 64 && av.list[2] == 64,
+              "ARP page: C and E held in TRIAD: a run of six (the shared E in each chord)");
+        check(lit > 20u, "ARP page: the note playing drawn in the track's colour");
+        fm1_in.notes = 0; frames(4);
+        check(av.len == 0u, "ARP page: the keys let go: an empty staff");
+        TSEL->p[P_AMODE] = 0; TSEL->p[P_SCALE] = sc; TSEL->p[P_CHORD] = ch;
+    }
     {   /* (2.4) GLO > SYSTEM: KNOB 1 is MIDI OUT (KEYS / SEQ), shown as such; the USB status in the third column */
         uint32_t i, m0 = (uint32_t)song.g[G_MIDI];
         for (i = 0; i < NPAGES; i++) if (!strcmp(PAGES[i].title, "SYSTEM")) break;
