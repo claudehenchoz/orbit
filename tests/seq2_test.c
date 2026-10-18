@@ -437,6 +437,29 @@ static void t_chordplus(void)
     keys(0);
     for (k = 0; k < 20u; k++) run_block();
     check(gated(&trk[0], c) == 0u, "CHORD+ keys: all let go: nothing held");
+    {   /* the arp over two chords that share notes: C (C E G) and E (E G B) hold six notes, not four; C let go:
+         * E's chord, whole, arpeggiates on */
+        uint8_t h[16];
+        trk[0].p[P_AMODE] = 1; trk[0].p[P_AHOLD] = 0; trk[0].p[P_AORDER] = 0;
+        keys(1u << 7);
+        keys(1u << 7 | 1u << 11);
+        memcpy(h, trk[0].held, 16);
+        check(trk[0].nheld == 6u && notes_are(h, 3, 60, 64, 67, -1) && notes_are(h + 3, 3, 64, 67, 71, -1),
+              "CHORD+ ARP: C then E held: C E G + E G B, six notes (the shared E and G in each)");
+        trk[0].p[P_AOCT] = 1; trk[0].arp_idx = 0xFFFFFFFFu;
+        for (k = 0; k < 7u; k++)
+            h[k] = (uint8_t)arp_next(&trk[0]);
+        check(h[0] == 60 && h[1] == 64 && h[2] == 64 && h[3] == 67 && h[4] == 67 && h[5] == 71 && h[6] == 60,
+              "CHORD+ ARP (UP): one run of the two chords is six steps, C E E G G B, then C again");
+        keys(1u << 11);
+        memcpy(h, trk[0].held, 16);
+        check(trk[0].nheld == 3u && notes_are(h, 3, 64, 67, 71, -1),
+              "CHORD+ ARP: C let go with E held: E G B arpeggiate on (not only B)");
+        keys(0);
+        check(trk[0].nheld == 0u, "CHORD+ ARP: all let go: the arp holds nothing");
+        for (k = 0; k < 20u; k++) run_block();
+        trk[0].p[P_AMODE] = 0;
+    }
     check(kb_map(&trk[0], 1) == KB_SILENT, "CHORD+: a modifier key plays no note of its own");
     /* STRUM 20 ms down: the notes start low to high, 20 ms apart */
     trk[0].p[P_STRUM] = 20;

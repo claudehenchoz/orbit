@@ -374,7 +374,9 @@ static void graph_big(void)
     for (c = 0; c < 4u; c++)
         n += ui.big_l[c][0] != 0;
     for (c = 0; c < 4u; c++) {
-        int32_t cx = n == 1u ? 120 : 30 + 60 * (int32_t)c, r = n == 1u ? 34 : 22, vy = 20 + 2 * r + 10, x;
+        /* the value in the dial's open foot; its 32-row cell ends inside the 124-row canvas (one value: r 34
+         * ends the cell at row 120, not 130, where the canvas cut its feet off) */
+        int32_t cx = n == 1u ? 120 : 30 + 60 * (int32_t)c, r = n == 1u ? 34 : 22, vy = n == 1u ? 88 : 74, x;
         uint16_t vc = ui.big_c[c] == C_DIM ? TE_G3 : ui.big_c[c] == C_WHITE ? C_WHITE : TE_COL[c & 3u];
         char l[16], v[16];
         if (!ui.big_l[c][0])

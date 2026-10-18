@@ -1029,24 +1029,28 @@ static int erasing(const track_t *t) { return trk_index(t) == er_trk && (er_lane
  * TRN, ROOT, SCALE, QNT as they are now). held_key: the key + 1 (bits 0..4) and the octave buttons then + 3 (bits
  * 5..7); 0: not a key of the track's scale (MIDI IN, the drum track, the GM kit, SLICE), held[i] plays as it is.
  * held_dt: held[i] above the key's own note (a chord's other notes). in_key: the key (+ 1) whose notes go into
- * input_on now (key_down, chord_revoice), 0: none */
+ * input_on now (key_down, chord_revoice) or out of input_off (key_up, chord_revoice), 0: none. held_src: the key
+ * (+ 1) each held[i] came from, scale or not, 0: MIDI IN. Two chords that share notes hold them once each (C and
+ * E in TRIAD: C E G and E G B, six notes, not four), and a key let go takes only its own notes with it */
 static uint8_t held_key[NTRK][16];
 static int8_t held_dt[NTRK][16];
+static uint8_t held_src[NTRK][16];
 static uint8_t in_key;
 static void arp_add(track_t *t, uint32_t note)
 {
-    uint32_t i;
+    uint32_t i, ti = trk_index(t);
     if (t->p[P_AHOLD] && t->arp_phys == 0u)
         t->nheld = 0;                               /* new chord replaces the latched one */
     t->arp_phys++;                                  /* every key-down: arp_remove counts every key-up */
     for (i = 0; i < t->nheld; i++)
-        if (t->held[i] == note)
-            return;                                 /* repeated note-on: not a new note */
+        if (t->held[i] == note && held_src[ti][i] == in_key)
+            return;                                 /* repeated note-on (of the same key): not a new note */
     if (t->nheld < 16u) {
-        uint32_t k = in_key - 1u, ti = trk_index(t);
+        uint32_t k = in_key - 1u;
         held_key[ti][t->nheld] = in_key && kb_scaled(t) ? (uint8_t)(in_key | (uint32_t)(kb_oct[k % 27u] + 3) << 5) : 0u;   /* (the
                                                        * key's octave: a CHORD+ note added after OCT moved, too) */
         held_dt[ti][t->nheld] = (int8_t)(held_key[ti][t->nheld] ? (int32_t)note - kb_root[k % 27u] : 0);
+        held_src[ti][t->nheld] = in_key;
         t->held[t->nheld++] = (uint8_t)note;
     }
     if (t->nheld == 1u) {
@@ -1057,15 +1061,16 @@ static void arp_add(track_t *t, uint32_t note)
 
 static void arp_remove(track_t *t, uint32_t note)
 {
-    uint32_t i, k = 0;
+    uint32_t i, k = 0, ti = trk_index(t);
     if (t->arp_phys)
         t->arp_phys--;
     if (t->p[P_AHOLD])
         return;
-    for (i = 0; i < t->nheld; i++)
-        if (t->held[i] != note) {
-            held_key[trk_index(t)][k] = held_key[trk_index(t)][i];
-            held_dt[trk_index(t)][k] = held_dt[trk_index(t)][i];
+    for (i = 0; i < t->nheld; i++)                  /* a key's note: that key's; else (MIDI IN, the pedal up) the note */
+        if (t->held[i] != note || (in_key && held_src[ti][i] != in_key)) {
+            held_key[ti][k] = held_key[ti][i];
+            held_dt[ti][k] = held_dt[ti][i];
+            held_src[ti][k] = held_src[ti][i];
             t->held[k++] = t->held[i];
         }
     t->nheld = (uint8_t)k;
@@ -1075,7 +1080,8 @@ static void arp_remove(track_t *t, uint32_t note)
 static uint32_t arp_next(track_t *t)
 {
     uint32_t cnt = 0, list[64], len = 0, i, j, o, ti = trk_index(t);
-    for (i = 0; i < t->nheld; i++) {               /* the notes as they play now (#191), each once */
+    for (i = 0; i < t->nheld; i++) {               /* the notes as they play now (#191), each held note once: a note
+                                                     * two chords share plays in each (the run is as long as the keys say) */
         uint32_t x = t->held[i], s = held_key[ti][i];
         if (s) {                                    /* a key: through the scale as it is now */
             x = kb_pitch(t, (s & 31u) - 1u, (int32_t)(s >> 5) - 3);
@@ -1083,10 +1089,7 @@ static uint32_t arp_next(track_t *t)
                 continue;                           /* (silent now: a black key under WHITE) */
             x = (uint32_t)clamp((int32_t)x + held_dt[ti][i], 0, 127);
         }
-        for (j = 0; j < cnt && list[j] != x; j++)
-            ;
-        if (j == cnt)
-            list[cnt++] = x;
+        list[cnt++] = x;
     }
     if (!cnt)
         return KB_SILENT;                           /* (every key silent now: a black key under WHITE since) */
@@ -1446,7 +1449,9 @@ static void chord_revoice(uint32_t sel)
             for (j = 0; j < nn && nw[j] != kb_nt[k][i]; j++)
                 ;
             if (j == nn) {
+                in_key = (uint8_t)(k + 1u);         /* (the arp lets go of this key's note only) */
                 input_off(t, kb_nt[k][i]);
+                in_key = 0;
                 midi_out_note(mc, (uint32_t)kb_nt[k][i], 0);
             }
         }
@@ -1623,10 +1628,12 @@ static void key_up(uint32_t k)
         return;
     case KS_NOTE:
         mc = trk_midi_ch(kb_trk[k] % NTRK);
+        in_key = (uint8_t)(k + 1u);                 /* (the arp lets go of this key's notes only: arp_remove) */
         for (i = 0; i < kb_n[k]; i++) {
             input_off(t, kb_nt[k][i]);
             midi_out_note(mc, (uint32_t)kb_nt[k][i], 0);
         }
+        in_key = 0;
         return;
     case KS_DRUM:
         if (ft_on && ft_trk == TRK_DRUM)
