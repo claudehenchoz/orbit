@@ -1663,7 +1663,7 @@ async function updater() {
   wrong.boot("ota-FM-1_015", "FM-1 Update");
   const e5 = await new Updater(wrong.access).resume(image, null, { product: "FM-1_015" }).then(() => null, (x) => x);
   ok(e5 && e5.code === "mismatch", "fm1ota.js: return to official: another firmware coming back is not 'done'");
-  const pk = await import(join(HERE, "fm1pkg.js"));
+  const pk = await import("./fm1pkg.js");
   const notStock = new Uint8Array(pk.STOCK_V15_SIZE);
   const e6 = await pk.validateStockPackage(notStock).then(() => null, (x) => x);
   ok(e6 && /official FM-1 V15/.test(e6.message), "fm1pkg.js: only the exact official V15 is accepted (SHA-256)");

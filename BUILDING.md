@@ -41,6 +41,32 @@ The build produces these artifacts in `build/`:
 
 On Linux x86-64 the toolchain runs natively and Docker is not needed.
 
+## Prerequisites (Windows)
+
+The toolchain runs in a WSL 2 distribution (x86-64, e.g. Ubuntu 24.04); Docker is not
+needed. Inside the distro, install `python3-pil`, then the toolchain and the SDK as above:
+
+```
+wsl -d Ubuntu-24.04
+cd /mnt/c/path/to/orbit
+sh tools/get_toolchain.sh
+git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
+    https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
+```
+
+Then either run `sh build.sh` inside the distro, or build from Windows (Python with Pillow);
+this generates the headers on Windows and compiles in WSL, with the same output:
+
+```
+python tools\build_windows.py --distro Ubuntu-24.04
+```
+
+`--toolchain` (a Linux path) and `--sdk` (a Windows path) override the in-distro defaults.
+The checkout must have LF line endings: the asset generators check byte hashes, and
+`.gitattributes` sets `eol=lf` for that. A clone made before that change needs its files
+checked out again. The host tests (`tools/orbit_check.py`, `tests/run_tests.sh`) need a
+POSIX `cc`; run them in the distro.
+
 ## Build
 
 ```
