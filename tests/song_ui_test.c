@@ -15,10 +15,23 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
     for(j=0;j<h;j++) for(i=0;i<w;i++) screen[(y+j)*240+x+i]=p[j*w+i];
 }
 #include "../firmware/src/gfx.c"
+static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
+{
+    uint32_t i,j;
+    assert(x+w<=240 && y+h<=240);
+    for(j=0;j<h;j++) for(i=0;i<w;i++) screen[(y+j)*240+x+i]=swap16(c);
+}
 enum {B_FX,B_SCL,B_ENV,B_LFO,B_EDIT,B_GLO,B_HOME,B_SAVE,B_ARP,B_SEQ,B_PLAY,B_REC,B_OCTDN,B_OCTUP,NB};
 enum {EN_SELECT,EN_ALGO,EN_PRESET,EN_K1,EN_K2,EN_K3,EN_K4,NE};
 static struct {uint8_t btn[NB];} panel;
-static struct {uint8_t home,page,force,msg_t;char msg[24];} ui;
+static struct {uint8_t home,page,force,msg_t;char msg[24];uint32_t frame;} ui;
+#define HEAD_BPM 1u
+#define NO_DIAL (-2)
+/* (the header, its hint and the knob strip are ui_studio.c's: not part of this test) */
+static void ui_hint(const char *s) {(void)s;}
+static void ui_head(const char *t,uint16_t c,const char *s,uint32_t f,uint32_t *k) {(void)t;(void)c;(void)s;(void)f;(void)k;}
+static void te_dials(int32_t y0,const char *const l[4],const char *const v[4],const int32_t r[4],uint32_t sig,uint32_t *k)
+{(void)y0;(void)l;(void)v;(void)r;(void)sig;(void)k;}
 static int32_t enc[NE];
 static uint32_t ready, scene_saves, order_saves, loads;
 static uint32_t arrangement_ready(void) {return ready;}

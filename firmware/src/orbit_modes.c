@@ -12,165 +12,110 @@ static uint32_t orbit_module_of(const page_t *pg)
 {
     return pg->scope==SC_ENGINE ? 0u : pg->fam==FAM_ENV ? 1u : pg->fam==FAM_FX ? 2u : 3u;
 }
-/* 헤더 둘째 줄: 네 모듈과 FM-1 키 이름. 현재 모듈은 흰색, 나머지는 회색. 오리지널의 T3/T4 반복(FX/LFO enable 전환)은
- * ORBIT에 없으므로 표시하지 않는다 */
-static void orbit_module_strip(uint32_t active)
-{
-    static const char *const MOD[4]={"T1 EDIT","T2 ENV","T3 FX","T4 LFO"};
-    uint32_t k;
-    for(k=0;k<4;k++) {                          /* the current module: white, underlined in its encoder's colour */
-        cv_text(8+(int32_t)k*58,18,&FONT_S,MOD[k],k==active?C_WHITE:TE_G3);
-        if(k==active) cv_rect(8+(int32_t)k*58,34,text_w(&FONT_S,MOD[k]),1,TE_COL[k]);
-    }
-}
+/* the sound pages (EDIT, ENV, LFO, FX): the header names the page; the body is the picture of the sound
+ * (the envelope, the LFO, the sends, the engine's rings) or, where an engine has no picture of its own,
+ * the sound itself, live (the output scope: you see what the knobs do); the knob strip under it, with a
+ * dial only where the body does not already draw the value and the value is an amount (not an enum) */
 static void orbit_sound_draw(void)
 {
-    static uint32_t cache;
+    static uint32_t head,cache,dials;
     const page_t *pg=cur_page();
     const engine_t *engine=ENGINES[TSEL->eng_req%NENGINES];
     int lfo_off = !TSEL->p[P_LD_PIT] && !TSEL->p[P_LD_FLT] && !TSEL->p[P_LD_SHP] && !TSEL->p[P_LD_AMP];
+    uint32_t eng=TSEL->eng_req, rings=pg->scope==SC_ENGINE && (eng==1 || eng==2 || eng==6);
+    uint32_t scope=!rings && (pg->scope==SC_ENGINE || (pg->graph==GR_NONE && pg->fam==FAM_ENV));
     const param_desc_t *desc[4];
-    char value[4][16], label[4][12], small[16], title[24];
-    int32_t ratio[4]; uint32_t k,x,sig=ui.page+TSEL->eng_req*71u+song.sel*65537u;
+    char value[4][16], label[4][12];   /* (te_dials reads them now: the stack) */
+    const char *lab[4]={label[0],label[1],label[2],label[3]}, *val[4]={value[0],value[1],value[2],value[3]};
+    char pos[8];
+    int32_t ratio[4], r[4]; uint32_t k,sig=ui.page+eng*71u+song.sel*65537u;
     for(k=0;k<4;k++) {
         int16_t *vp; const char *unit;
-        desc[k]=page_desc(pg,k,&vp); ratio[k]=0; value[k][0]=label[k][0]=0;
+        desc[k]=page_desc(pg,k,&vp); ratio[k]=NO_DIAL; r[k]=0; value[k][0]=label[k][0]=0;
         if(desc[k] && desc[k]->label && desc[k]->label[0]!='-') {
+            uint32_t drawn=pg->graph==GR_ADSR || pg->graph==GR_FX || rings || (pg->graph==GR_LFO && k>=2u);
             str_cpy(label[k],desc[k]->label,sizeof label[k]);
             param_format(desc[k],*vp,value[k],&unit);
-            ratio[k]=clamp(RATIO(desc[k],*vp),0,1000); sig=sig*31u+(uint32_t)*vp;
+            r[k]=clamp(RATIO(desc[k],*vp),0,1000);  /* (the pictures read it, dial or not) */
+            if(!drawn && desc[k]->fmt!=F_ENUM) ratio[k]=r[k];
+            sig=sig*31u+(uint32_t)*vp;
         }
     }
-    /* The sample/grain page shows the live master output, labelled explicitly. */
-    if(pg->scope==SC_ENGINE && (TSEL->eng_req==4 || TSEL->eng_req==8)) sig=sig*31u+scope_w;
-    sig=sig*31u+ui.msg_t+ui.hot_t+ui.hot_col;
+    page_pos(pos);
+    ui_head(pg->scope==SC_ENGINE ? engine->name : pg->title,C_WHITE,
+            pg->graph==GR_LFO && lfo_off ? "NO DEPTH" : pos,0,&head);
+    if(scope) sig=sig*31u+scope_w;                  /* (live: every frame) */
     if(pg->fam==FAM_LFO) sig=sig*31u+(uint32_t)lfo_off;
-    sig=sig*31u+(uint32_t)batt_shown();
-    if(!ui.force && sig==cache) return;
-    cache=sig;
-    cv_begin(240,36,C_BLACK);
-    str_cpy(title,pg->scope==SC_ENGINE ? engine->name : pg->fam==FAM_LFO ?
-            (pg->id[0]==P_LSYNC ? "LFO SYNC 2/3" : pg->graph==GR_LFO ? "LFO SOURCE 1/3" : "LFO DEST 3/3") :
-            pg->graph==GR_FX ? "FX TRACK" : pg->title,sizeof title);
-    cv_text(8,2,&FONT_S,title,C_WHITE);
-    fmt_int(small,song.sel+1); cv_text(198,2,&FONT_S,small,TE_COL[song.sel]);
-    draw_battery(0);
-    if(pg->fam==FAM_LFO && pg->graph==GR_LFO && lfo_off)
-        cv_text(8,20,&FONT_S,"NO DEPTH: PRESS LFO",TE_G3);
-    else if(ui.hot_t && label[ui.hot_col][0]) {
-        cv_text(8,20,&FONT_S,label[ui.hot_col],TE_COL[ui.hot_col]);
-        cv_text(72,20,&FONT_S,value[ui.hot_col],C_WHITE);
-    } else orbit_module_strip(orbit_module_of(pg));
-    cv_blit(0,0);
-    lcd_fill(0,36,240,4,C_BLACK);
-    cv_begin(240,124,C_BLACK);
-    if(pg->graph==GR_ADSR) {
-        int32_t a=16+ratio[0]*45/1000,d=a+16+ratio[1]*45/1000,y=108-ratio[2]*86/1000;
-        cv_line(12,110,a,12,TE_COL[0]); cv_line(a,12,d,y,TE_COL[1]);
-        cv_line(d,y,180,y,TE_COL[2]); cv_line(180,y,200+ratio[3]*28/1000,110,TE_COL[3]);
-        te_disc(a,12,4,TE_COL[0]); te_disc(d,y,4,TE_COL[1]); te_disc(180,y,4,TE_COL[2]);
-    } else if(pg->fam==FAM_LFO) {
-        graph_lfo(TSEL,TE_COL[0]);
-        orbit_ring(192,34,17+ratio[2]*12/1000,TE_COL[2]);
-        orbit_ring(192,34,8+ratio[3]*8/1000,TE_COL[3]);
-    } else if(pg->scope==SC_ENGINE && (TSEL->eng_req==4 || TSEL->eng_req==8)) {
-        cv_text(8,0,&FONT_S,"OUTPUT",TE_G3);
-        for(k=0;k<4;k++) {                      /* (a column a sample, 1/16 px: as cheap loud as quiet) */
-            cv_curve_begin(22,TE_COL[k]);
-            for(x=0;x<=54;x++) {
-                uint32_t p=(scope_w+x*2u+k*108u)&(SCOPE_N-1u);
-                cv_curve_pt(12+(int32_t)(k*54+x),62*16+8+scope_buf[p]*45*16/32768);
-            }
-            cv_curve_end();
-        }
-        cv_line(14,114,226,114,TE_G2);
-    } else if(pg->scope==SC_ENGINE && (TSEL->eng_req==1 || TSEL->eng_req==2 || TSEL->eng_req==6)) {
-        /* Parameter-driven resonator/orbit diagram; not an audio measurement. */
-        for(k=0;k<4;k++) {
-            int32_t cx=68+(int32_t)k*34,cy=60+(k%2 ? 10 : -10),r=18+ratio[k]*22/1000;
-            uint32_t angle=(uint32_t)ratio[k]*1023/1000;
-            orbit_ring(cx,cy,r,TE_COL[k]);
-            cv_line(cx,cy,cx+((SINE[(angle+256)&1023]*r)>>15),cy+((SINE[angle]*r)>>15),TE_COL[k]);
-            te_disc(cx,cy,3,C_WHITE);
-        }
-    } else if(pg->graph==GR_FX) {
-        /* T3 effect: 네 send(DST CHO DLY REV)를 encoder 색의 얇은 세로 게이지로 그린다. 파라미터 값이며 오디오 측정이 아니다 */
-        for(k=0;k<4;k++) {
-            int32_t gx=30+(int32_t)k*60,h=ratio[k]*88/1000;
-            cv_rect(gx,16,1,92,TE_G2);
-            if(h) cv_rect(gx,108-h,1,h,TE_COL[k]);
-            cv_rect(gx-8,108-h,17,1,TE_COL[k]);
-        }
-        cv_line(12,110,228,110,TE_G2);
-    } else {
-        /* Four coloured oscillator curves, driven by the active page values. */
-        for(k=0;k<4;k++) {
-            int32_t py=0;
-#if CV_AA
-            cv_curve_begin(22,TE_COL[k]);
-#endif
-            for(x=0;x<216;x++) {
-                uint32_t phase=(x*(5u+(uint32_t)ratio[k]/100u)+k*128u)&1023u;
-#if CV_AA   /* 1/16 px: the curve no longer snaps to whole rows */
-                int32_t y=62*16+8+((SINE[phase]*(18+ratio[k]*30/1000))>>11);
-                cv_curve_pt(12+x,y); (void)py;
-#else
-                int32_t y=62+((SINE[phase]*(18+ratio[k]*30/1000))>>15);
-                if(x) cv_line(11+x,py,12+x,y,TE_COL[k]); py=y;
-#endif
-            }
-#if CV_AA
-            cv_curve_end();
-#endif
-        }
-    }
-    cv_blit(0,40);
-    cv_begin(240,24,C_BLACK);
-    for(k=0;k<4;k++) { if(label[k][0]) te_dial(30+k*60,12,10,ratio[k],TE_COL[k],TE_DIM[k]); }
-    cv_blit(0,164);
-    /* as the OP-1: under each dial its label, small, then the value large and thin in the knob's colour
-     * (a value too wide for the large type: small, on the same line) */
-    cv_begin(240,52,C_BLACK);
-    if(ui.msg_t) cv_text((240-text_w(&FONT_S,ui.msg))/2,18,&FONT_S,ui.msg,C_WHITE);
-    else for(k=0;k<4;k++) {
-        int32_t cx=30+(int32_t)k*60; uint16_t vc=ui.hot_t && ui.hot_col==k?C_WHITE:TE_COL[k];
-        te_upfit(small,label[k],sizeof small,58); te_text_c(cx,0,small,TE_G3);
-        te_upfit(small,value[k],sizeof small,58);
-        if(text_w(&FONT_L,small)<=58) cv_text(cx-text_w(&FONT_L,small)/2,14,&FONT_L,small,vc);
-        else te_text_c(cx,26,small,vc);
-    }
-    cv_blit(0,188);
-}
-
-/* 믹서(GLO): 오리지널 OP-1 Mixer T1처럼 네 개의 색 level 바와 네 knob = 트랙 1..4 level(드럼은 G_DRLVL). SELECT로
- * PAN 페이지: 네 트랙의 pan을 가로 눈금 위의 마커로. 한 번 더 SELECT: TRACK 페이지, 예전 경로 그대로(전역 swing / 선택 트랙의
- * level / steps / pan). 화면의 도해와 하단 다이얼은 tracks_edit이 실제로 바꾸는 값이다 */
-static void orbit_mixer_draw(void)
-{
-    static uint32_t cache,footer;
-    uint32_t k,kind=mixer_kind(),pan=kind==MX_PAN,sig=song.sel+song.solo*31u+song.g[G_BPM]*71u+kind*7u;
-    char b[16],hint[32];
-    for(k=0;k<NTRK;k++) sig=sig*31u+trk[k].p[P_LEVEL]+trk[k].p[P_MUTE]*521u+trk[k].p[P_PAN]*17u+trk[k].eng_req*97u;
-    sig=sig*31u+song.g[G_DRLVL];
-    sig=(sig*31u+(uint32_t)batt_shown())*2u+(song.rec!=0u);
-    if(pl_shown()) { uint32_t total; sig=sig*31u+preset_pos(&total)+1u+TSEL->user*257u+up_gen*7919u; }
     if(ui.force || sig!=cache) {
         cache=sig;
-        cv_begin(240,36,C_BLACK);
-        cv_text(8,2,&FONT_S,song.rec?"REC / NO AUTO":"MIXER",song.rec?TE_RED:C_WHITE); fmt_int(b,song.g[G_BPM]); cv_text(178,2,&FONT_S,b,TE_G3);
-        draw_battery(0);
-        if(kind==MX_TRACK) {                        /* 둘째 줄: 이 페이지의 네 knob과 SELECT가 가는 곧 */
-            str_cpy(hint,"TRACK ",sizeof hint); fmt_int(hint+6,(int32_t)song.sel+1);
-            str_cpy(hint+str_len(hint),"   SELECT: PAN",sizeof hint-str_len(hint));
-        } else str_cpy(hint,pan?"PAN 1-4   SELECT: LEVEL":"LEVEL 1-4   SELECT: PAN",sizeof hint);
-        cv_text(8,20,&FONT_S,hint,TE_G3); cv_blit(0,0);
+        if(ui.force) { lcd_fill(0,24,240,18,C_BLACK); lcd_fill(0,166,240,18,C_BLACK); }
+        cv_begin(240,124,C_BLACK);
+        if(pg->graph==GR_ADSR) {
+            int32_t a=16+r[0]*45/1000,d=a+16+r[1]*45/1000,y=108-r[2]*86/1000;
+            cv_line(12,110,a,12,TE_COL[0]); cv_line(a,12,d,y,TE_COL[1]);
+            cv_line(d,y,180,y,TE_COL[2]); cv_line(180,y,200+r[3]*28/1000,110,TE_COL[3]);
+            te_disc(a,12,4,TE_COL[0]); te_disc(d,y,4,TE_COL[1]); te_disc(180,y,4,TE_COL[2]);
+        } else if(pg->fam==FAM_LFO) {
+            graph_lfo(TSEL,TE_COL[0]);
+            orbit_ring(192,34,17+r[2]*12/1000,TE_COL[2]);
+            orbit_ring(192,34,8+r[3]*8/1000,TE_COL[3]);
+        } else if(rings) {
+            /* Parameter-driven resonator/orbit diagram; not an audio measurement. */
+            for(k=0;k<4;k++) {
+                int32_t cx=68+(int32_t)k*34,cy=60+(k%2 ? 10 : -10),rr=18+r[k]*22/1000;
+                uint32_t angle=(uint32_t)r[k]*1023/1000;
+                orbit_ring(cx,cy,rr,TE_COL[k]);
+                cv_line(cx,cy,cx+((SINE[(angle+256)&1023]*rr)>>15),cy+((SINE[angle]*rr)>>15),TE_COL[k]);
+                te_disc(cx,cy,3,C_WHITE);
+            }
+        } else if(pg->graph==GR_FX) {
+            /* T3 effect: 네 send(DST CHO DLY REV)를 encoder 색의 얇은 세로 게이지로 그린다. 파라미터 값이며 오디오 측정이 아니다 */
+            for(k=0;k<4;k++) {
+                int32_t gx=30+(int32_t)k*60,h=r[k]*88/1000;
+                cv_rect(gx,16,1,92,TE_G2);
+                if(h) cv_rect(gx,108-h,1,h,TE_COL[k]);
+                cv_rect(gx-8,108-h,17,1,TE_COL[k]);
+            }
+            cv_line(12,110,228,110,TE_G2);
+        } else
+            graph_scope(TE_COL[song.sel&3u],62,52);  /* the sound, live */
+        cv_blit(0,42);
+    }
+    te_dials(184,lab,val,ratio,sig,&dials);
+}
+
+/* MIXER (GLO on HOME), as the OP-1's: the four faders are the levels (PAN: the markers are the pans), so
+ * the knob strip names the tracks and gives the numbers, no dials. SELECT: LEVEL -> PAN -> TRACK, the
+ * selected track's own swing / level / steps / pan (its name and its pattern above them) */
+static void orbit_mixer_draw(void)
+{
+    static uint32_t head,cache,footer;
+    uint32_t k,kind=mixer_kind(),pan=kind==MX_PAN,sig=song.sel+song.solo*31u+kind*7u;
+    char b[16];
+    for(k=0;k<NTRK;k++) sig=sig*31u+trk[k].p[P_LEVEL]+trk[k].p[P_MUTE]*521u+trk[k].p[P_PAN]*17u+trk[k].eng_req*97u;
+    sig=sig*31u+song.g[G_DRLVL];
+    if(kind==MX_TRACK) for(k=0;k<NSTEP;k++) sig=sig*3u+(uint32_t)trk_step_on(TSEL,k);
+    if(pl_shown()) { uint32_t total; sig=sig*31u+preset_pos(&total)+1u+TSEL->user*257u+up_gen*7919u; }
+    ui_head(kind==MX_TRACK?"TRACK":pan?"PAN":"MIXER",C_WHITE,song.rec?"NO AUTO":0,0,&head);
+    if(ui.force || sig!=cache) {
+        cache=sig;
+        if(ui.force) { lcd_fill(0,24,240,12,C_BLACK); lcd_fill(0,160,240,24,C_BLACK); }
         cv_begin(240,124,C_BLACK);
         if(pl_shown()) { cv_oy=0; graph_browse(); }   /* PRESETS turned: the sounds around the one just loaded */
-        else for(k=0;k<NTRK;k++) {
+        else if(kind==MX_TRACK) {                   /* the selected track: its name, its pattern */
+            uint32_t len=(uint32_t)clamp(TSEL->p[P_SLEN],1,64),j;
+            if(is_drum(TSEL)) str_cpy(b,DRUM_KIT_NAMES[drum_kit()],sizeof b); else trk_short_name(song.sel,b);
+            cv_text(8,14,&FONT_L,b,TE_COL[song.sel&3u]);
+            for(j=0;j<16u;j++) {
+                uint32_t a=j*len/16u,z=(j+1u)*len/16u,q,on=0;
+                if(z==a) z=a+1u;
+                for(q=a;q<z && q<NSTEP;q++) if(trk_step_on(TSEL,q)) on=1;
+                cv_rect(8+(int32_t)j*14,68,10,24,on?TE_COL[song.sel&3u]:TE_G1);
+            }
+        } else for(k=0;k<NTRK;k++) {
             int32_t cx=30+(int32_t)k*60,level=(int32_t)trk_level(k),j;
             uint16_t col=trk_silent(&trk[k])?TE_DIM[k]:TE_COL[k];
-            fmt_int(b,(int32_t)k+1); cv_text(cx-4,2,&FONT_S,b,col);
-            if(k==song.sel) orbit_ring(cx,11,10,C_WHITE);
+            if(k==song.sel) te_disc(cx,12,3,C_WHITE);   /* the selected track */
             if(pan) {
                 /* pan: L..R 눈금과 가운데 표시 위에 트랙 색 마커 */
                 int32_t px=cx-18+(trk[k].p[P_PAN]+64)*36/127;
@@ -185,33 +130,31 @@ static void orbit_mixer_draw(void)
             if(trk_silent(&trk[k])) cv_line(cx-8,113,cx+8,113,TE_G3);
         }
         cv_blit(0,36);
-        cv_begin(240,24,C_BLACK);
-        for(k=0;k<NTRK;k++) {                       /* 열의 이름: 트랙의 엔진(드럼 트랙은 drum) */
-            te_upfit(b,is_drum(&trk[k])?"DRUM":ENGINES[trk[k].eng_req%NENGINES]->name,sizeof b,58);
-            te_text_c(30+(int32_t)k*60,2,b,k==song.sel?TE_G4:TE_G3);
-        }
-        cv_blit(0,160);
     }
-    {   /* 하단 다이얼: KNOB 1..4가 실제로 편집하는 네 트랙의 level(mute는 첫 회전이 푸는 것을 알린다) 또는 pan,
-         * TRACK 페이지에서는 예전 경로의 swing / level / steps / pan */
-        static const char *const LAB_LVL[4]={"level 1","level 2","level 3","level 4"};
-        static const char *const LAB_PAN[4]={"pan 1","pan 2","pan 3","pan 4"};
-        static const char *const LAB_TRK[4]={"swing","level","steps","pan"};
-        char v[4][8]; const char *val[4]={v[0],v[1],v[2],v[3]};
+    {   /* the knobs: LEVEL / PAN of tracks 1..4 (named by their engines; mute: the first turn unmutes), or
+         * on TRACK the selected track's swing / level / steps / pan */
+        static const char *const LAB_TRK[4]={"SWING","LEVEL","STEPS","PAN"};
+        char names[4][10], v[4][8];
+        const char *lab[4]={names[0],names[1],names[2],names[3]}, *val[4]={v[0],v[1],v[2],v[3]};
         int32_t ratio[4];
         if(kind==MX_TRACK) {
             const track_t *t=TSEL; int32_t level=(int32_t)trk_level(song.sel);
             swing_str(v[0],song.g[G_SWING]); ratio[0]=song.g[G_SWING]*10;
-            if(t->p[P_MUTE]) { str_cpy(v[1],"mute",sizeof v[1]); ratio[1]=0; }
+            if(t->p[P_MUTE]) { str_cpy(v[1],"MUTE",sizeof v[1]); ratio[1]=0; }
             else { fmt_int(v[1],level*100/127); ratio[1]=level*1000/127; }
             fmt_int(v[2],t->p[P_SLEN]); ratio[2]=(t->p[P_SLEN]-1)*1000/63;
             fmt_int(v[3],t->p[P_PAN]); ratio[3]=(t->p[P_PAN]+64)*1000/127;
-        } else for(k=0;k<NTRK;k++) {
-            int32_t level=(int32_t)trk_level(k);
-            if(pan) { fmt_int(v[k],trk[k].p[P_PAN]); ratio[k]=(trk[k].p[P_PAN]+64)*1000/127; }
-            else if(trk[k].p[P_MUTE]) { str_cpy(v[k],"mute",sizeof v[k]); ratio[k]=0; }
-            else { fmt_int(v[k],level*100/127); ratio[k]=level*1000/127; }
+            te_dials(184,LAB_TRK,val,ratio,sig,&footer);
+            return;
         }
-        te_dials(184,kind==MX_TRACK?LAB_TRK:pan?LAB_PAN:LAB_LVL,val,ratio,sig,&footer);
+        for(k=0;k<NTRK;k++) {
+            int32_t level=(int32_t)trk_level(k);
+            str_cpy(names[k],is_drum(&trk[k])?"DRUM":ENGINES[trk[k].eng_req%NENGINES]->name,sizeof names[k]);
+            ratio[k]=NO_DIAL;                       /* (the fader / the marker is the picture) */
+            if(pan) fmt_int(v[k],trk[k].p[P_PAN]);
+            else if(trk[k].p[P_MUTE]) str_cpy(v[k],"MUTE",sizeof v[k]);
+            else fmt_int(v[k],level*100/127);
+        }
+        te_dials(184,lab,val,ratio,sig,&footer);
     }
 }

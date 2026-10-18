@@ -116,13 +116,8 @@ static int brighter(uint16_t screen_px, uint16_t dim)
     uint16_t p = swap16(screen_px);
     return (p >> 11) > (dim >> 11) && ((p >> 5) & 63u) > ((dim >> 5) & 63u) && (p & 31u) > (dim & 31u);
 }
-/* 사운드 페이지 헤더 둘째 줄(y 20..35)의 모듈 칸 cell(x 8 + 58 cell 부터 56 px)에 있는 흰 글자 픽셀 수: 현재 모듈 칸만 흰색이다 */
-static uint32_t strip_white(uint32_t cell)
-{
-    uint32_t x, y, n = 0;
-    for (y = 20; y < 36u; y++) for (x = 8 + cell * 58u; x < 8 + cell * 58u + 56u; x++) n += brighter(screen[y * 240u + x], TE_G3);
-    return n;
-}
+/* the sound page names its module in the header (ui_head): the engine (EDIT), ENV, FX, the LFO page */
+static int title_is(const char *t) { return !strcmp(head_title_shown, t); }
 
 /* the seven PRESETS list rows as graph_browse draws them from screen row y0 (canvas row 4 + 17 per row): the name
  * column's lit pixels and its white text ones, brighter than C_GRAY (the current row only) */
@@ -476,15 +471,15 @@ int main(int argc, char **argv)
     open_family(FAM_EDIT); frame(); ppm("orbit-synth");
     /* 오리지널 OP-1의 네 모듈 T1 engine / T2 envelope / T3 effect / T4 LFO와 FM-1 키 EDIT / ENV / FX / LFO: 헤더 둘째 줄에서
      * 현재 모듈 칸만 흰색이다 */
-    check(orbit_sound_page() && orbit_module_of(cur_page())==0 && strip_white(0) && !strip_white(1) && !strip_white(2) && !strip_white(3),
+    check(orbit_sound_page() && orbit_module_of(cur_page())==0 && title_is(ENGINES[TSEL->eng_req]->name),
           "EDIT shows T1 engine as the active module");
     open_family(FAM_ENV); frame(); ppm("orbit-envelope");
-    check(orbit_module_of(cur_page())==1 && strip_white(1) && !strip_white(0) && !strip_white(2) && !strip_white(3),
+    check(orbit_module_of(cur_page())==1 && title_is("ENV"),
           "ENV shows T2 envelope as the active module");
     check(cur_page()->id[0]==P_ATK && cur_page()->id[1]==P_DEC && cur_page()->id[2]==P_SUS && cur_page()->id[3]==P_REL,
           "ENV default page is A / D / S / R on the four encoders");
     open_family(FAM_FX); frame(); ppm("orbit-fx");
-    check(orbit_sound_page() && orbit_module_of(cur_page())==2 && strip_white(2) && !strip_white(1) && !strip_white(3),
+    check(orbit_sound_page() && orbit_module_of(cur_page())==2 && title_is("FX"),
           "FX shows T3 effect as the active module");
     open_family(FAM_FX); frame();
     check(!orbit_sound_page() && str_eq(cur_page()->title,"FILTER"),"FX again walks to the FILTER subpage, not an enable toggle");
@@ -494,12 +489,12 @@ int main(int argc, char **argv)
     check(str_eq(cur_page()->title,"LFO 2") && cur_page()->id[0]==P_LSYNC,"LFO second press: LFO 2 (SYNC TRIG POL, 2.6)");
     open_family(FAM_LFO); frame(); ppm("orbit-lfo-dest");
     check(cur_page()->id[0]==P_LD_PIT && cur_page()->id[3]==P_LD_AMP,"LFO third press opens audible modulation destinations");
-    check(orbit_module_of(cur_page())==3 && strip_white(3) && !strip_white(0),"LFO DEST shows T4 LFO as the active module");
+    check(orbit_module_of(cur_page())==3 && title_is("LFO DEST"),"LFO DEST shows T4 LFO as the active module");
     encs[panel.enc[EN_K1+3]]=30; frame();
     check(TSEL->p[P_LD_AMP]>0,"LFO DEST KNOB4 updates the actual amplitude depth");
     /* depth가 있으면 SOURCE 페이지도 NO DEPTH 힌트 대신 모듈 안내를 보인다 */
     open_family(FAM_LFO); frame();
-    check(cur_page()->graph==GR_LFO && strip_white(3) && !strip_white(2),"LFO SOURCE with a depth set shows T4 LFO as the active module");
+    check(cur_page()->graph==GR_LFO && title_is("LFO"),"LFO SOURCE with a depth set shows T4 LFO as the active module");
     set_engine_of(TSEL,1); apply_preset_to(TSEL,0); TSEL->engine=TSEL->eng_req;
     open_family(FAM_EDIT); frame(); ppm("orbit-digital");
     set_engine_of(TSEL,4); apply_preset_to(TSEL,0); TSEL->engine=TSEL->eng_req;

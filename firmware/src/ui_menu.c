@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* SLOOP menu (HOME held), in sections as the pages are (2.4): SCREEN (COLOR, ZOOM), LIGHTS (LIGHTS, KEYS, NOTES),
+/* SLOOP menu (HOME held), in sections as the pages are (2.4): SCREEN (STYLE), LIGHTS (LIGHTS, KEYS, NOTES),
  * AUDIO (LOWCUT, USB AUDIO, USB SERIAL), SYSTEM (HARDWARE CALIBRATION, MIDI LEARN CLEAR, ABOUT). SELECT goes to the section
  * before / after (stopping at the ends), KNOB 1..3 set the section's settings in order (the knob's colour marks
  * its row), PRESETS moves the cursor; OCT+ steps the cursor's setting round or opens it (CALIBRATION, ABOUT),
  * OCT- closes (from ABOUT: back to the section). */
 /* ------------------------------------------------------------ menu --- */
-enum { MI_COLOR, MI_ZOOM, MI_LIGHTS, MI_KEYS, MI_NOTES, MI_LOWCUT, MI_USB, MI_SERIAL, MI_PANEL, MI_LCLEAR, MI_ABOUT, MI_DEMO,
+enum { MI_COLOR, MI_LIGHTS, MI_KEYS, MI_NOTES, MI_LOWCUT, MI_USB, MI_SERIAL, MI_PANEL, MI_LCLEAR, MI_ABOUT, MI_DEMO,
        MI_COUNT };
-static const char *const MI_NAME[MI_COUNT] = {"STYLE", "ZOOM", "LIGHTS", "KEYS", "NOTES", "SPEAKER LOWCUT", "USB AUDIO",
+static const char *const MI_NAME[MI_COUNT] = {"STYLE", "LIGHTS", "KEYS", "NOTES", "SPEAKER LOWCUT", "USB AUDIO",
                                               "USB SERIAL", "HARDWARE CALIBRATION", "MIDI LEARN CLEAR", "ABOUT",
                                               "DEMO SONG"};
 static uint8_t orbit_demo_pending;
@@ -36,7 +36,6 @@ static const char *mi_value(uint32_t i, uint16_t *c)
     switch (i) {
     case MI_DEMO: return song.playing ? "STOP FIRST" : orbit_demo_pending ? "PRESS AGAIN" : "FIRST LIGHT";
     case MI_COLOR: return PALETTES[settings.palette].name;
-    case MI_ZOOM: return settings.zoom ? "ON" : "OFF";
     case MI_LIGHTS: return LIGHTS_NAME[lights_lvl % LIGHTS_N];
     case MI_KEYS:
         *c = lights_lvl ? C_HI : C_DIM;               /* (needs LIGHTS) */
@@ -62,12 +61,23 @@ static const char *mi_value(uint32_t i, uint16_t *c)
     }
 }
 
+static uint8_t menu_hint;
 static void draw_menu(void)
 {
     uint32_t i, pass, sec = mi_sec(ui.menu_sel % MI_COUNT);
     uint32_t sig = ui.menu * 7u + ui.menu_sel * 131u + settings.palette * 1009u + settings.lowcut * 7919u +
-                   settings.zoom * 104729u + lights_lvl * 1299709u + lights_keys * 15485863u + ml_count() * 2654435u +
+                   lights_lvl * 1299709u + lights_keys * 15485863u + ml_count() * 2654435u +
                    lights_notes * 32452843u + usb_full * 49979687u + usb_serial * 86028121u + orbit_demo_pending * 17u + song.playing;
+    {   /* the keys' hint: its first two seconds (a frame missed: the menu has just opened) */
+        static uint32_t last, hint;
+        if (ui.frame != last + 1u)
+            hint = 120;
+        last = ui.frame;
+        if (hint)
+            hint--;
+        sig = sig * 3u + (hint != 0);
+        menu_hint = hint != 0;
+    }
     if (!ui.force && sig == ui.menu_sig)
         return;
     ui.menu_sig = sig;
@@ -144,7 +154,7 @@ static void draw_menu(void)
                 if (i == MI_SERIAL && usb_serial != usb_cdc_now())
                     cv_text(xv + 8, y + 30, &FONT_S, "RESTART", C_AMB);   /* (usb.c: at the next start) */
             }
-            if (rows <= 3u) {
+            if (rows <= 3u && menu_hint) {
                 cv_text(4, MI_Y0 + 3 * MI_DY + 6, &FONT_S, "SELECT SECTION  KNOB SETS", C_DIM);
                 cv_text(4, MI_Y0 + 3 * MI_DY + 22, &FONT_S, "OCT+ OK   OCT- CLOSE", C_DIM);
             }
@@ -181,9 +191,8 @@ static void mi_set(uint32_t i, int32_t s)
         settings.palette = (settings.palette + (s < 0 ? NPALETTES - 1u : 1u)) % NPALETTES;
         palette_set(settings.palette);
         break;
-    case MI_ZOOM:
     case MI_LOWCUT: {                                  /* right ON, left OFF; OCT+ toggles */
-        uint32_t *v = i == MI_LOWCUT ? &settings.lowcut : &settings.zoom;
+        uint32_t *v = &settings.lowcut;
         *v = s > 0 ? 1u : s < 0 ? 0u : !*v;
         fx_lowcut = (uint8_t)(settings.lowcut != 0);
         break;

@@ -44,6 +44,11 @@ static uint8_t sync_reload;                  /* engine / preset / project / user
 #define G_OY 24                       /* graphs draw in the lower 100 px; the focus readout sits on top */
 #define Y_FOOT 202
 #define H_FOOT 38
+/* the one header (ui_head, ui_studio.c): the BPM after the title; no message (the screen says it otherwise) */
+#define HEAD_BPM 1u
+#define HEAD_NOMSG 2u
+/* the knob strip (te_dials, ui_studio.c): a column with its label and value but no dial */
+#define NO_DIAL (-2)
 
 static struct {
     uint8_t home;
@@ -58,6 +63,8 @@ static struct {
     uint32_t menu_sig, home_t0;  /* HOME press time (btn_hold) */
     uint8_t force;               /* full redraw pending */
     uint8_t msg_t;               /* transient message frames */
+    uint8_t hint_t, hint_new;    /* frames the screen's key hint stays in the header (on opening it); set, not yet shown */
+    const char *hint;
     uint8_t pl_t, pl_page, pl_sel;   /* PRESETS list: frames left, the page (0xFF = HOME) and track it opened on */
     uint8_t bpm_t;               /* frames the BPM stays highlighted after a SELECT turn */
     uint8_t arm, arm_t;          /* destructive action armed: param id, frames left to confirm */
@@ -83,12 +90,9 @@ static struct {
     char msg[24];
     uint32_t enc_t[NE];
     /* drawn-state cache */
-    char col[4][32];
-    char focus_l[8], focus_v[8], focus_u[8];   /* the touched column, shown large */
-    char big_l[4][8], big_v[4][10], big_u[4][8];   /* the four columns, for the big values (2.4: pages without a graph) */
+    char big_l[4][8], big_v[4][10], big_u[4][8];   /* the four knobs here: label, value, unit (draw_column) */
     uint16_t big_c[4];
-    uint32_t graph_sig, head_sig, foot_sig, frame;
-    uint8_t graph_top;           /* the graph strip's top G_OY rows hold something */
+    uint32_t graph_sig, frame;
 } ui;
 
 static const page_t *cur_page(void) { return &PAGES[ui.page]; }
@@ -131,6 +135,13 @@ static void ui_say(const char *a, const char *b)
 }
 
 static void ui_message(const char *s) { ui_say(s, ""); }
+/* a screen's key hint (what the modifiers do there): in the header for ~2 s, then gone */
+static void ui_hint(const char *s)
+{
+    ui.hint = s;
+    ui.hint_t = 120;
+    ui.hint_new = 1;
+}
 
 static void page_entered(void)
 {

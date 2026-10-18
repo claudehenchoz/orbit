@@ -42,86 +42,86 @@ static void orbit_ring(int32_t cx,int32_t cy,int32_t r,uint16_t color)
     }
 #endif
 }
-static void orbit_reel(int32_t cx,int32_t cy,int32_t r,uint32_t phase,uint16_t color)
+/* a reel: its flange in the track colour, the tape wound on it (pack: its radius, the more tape the
+ * bigger), three spokes turned to phase, the hub */
+static void orbit_reel(int32_t cx,int32_t cy,int32_t r,int32_t pack,uint32_t phase,uint16_t color)
 {
     uint32_t j;
-    orbit_ring(cx,cy,r,color); orbit_ring(cx,cy,r-4,TE_G2); orbit_ring(cx,cy,8,color);
+    orbit_ring(cx,cy,r,color);
+    te_disc(cx,cy,pack,TE_G1); orbit_ring(cx,cy,pack,TE_G2);
+    orbit_ring(cx,cy,8,color);
     for(j=0;j<3;j++) {
         uint32_t a=(phase+j*341u)&1023u;
-        int32_t x=cx+((SINE[(a+256)&1023u]*(r-12))>>15), y=cy+((SINE[a]*(r-12))>>15);
-        te_disc(x,y,6,TE_G2); cv_line(cx,cy,x,y,color);
+        cv_line(cx,cy,cx+((SINE[(a+256)&1023u]*(r-6))>>15),cy+((SINE[a]*(r-6))>>15),color);
     }
     te_disc(cx,cy,3,C_WHITE);
 }
 static void graph_browse(void);   /* ui_draw.c: the seven-row preset list */
+/* TAPE (HOME): the reels are the transport. The tape runs from the left reel to the right one through
+ * the selected track's loop (stopped: to HEAD, so KNOB 1 winds it), the spokes turn a step at a time,
+ * the head glows red while recording and the tape snaps tight on each bar's first beat. Under them the
+ * four tracks as lanes: IN..OUT shaded, HEAD marked, the play heads. The knobs: HEAD IN OUT, COPY/LIFT;
+ * SEL held shows what OCT- / OCT+ do here (ui_layers.c). */
 static void orbit_screen_draw(void)
 {
-    static uint32_t cache;
-    uint32_t i,j,total,pl=pl_shown() ? preset_pos(&total)+1u : 0u,sig=pl*7919u+orbit_tape.revision+song.sel*17u+song.rec*97u+song.playing;
+    static uint32_t head,cache,dials;
+    uint32_t i,j,total,pl=pl_shown() ? preset_pos(&total)+1u : 0u,len=trk_len(TSEL);
+    uint32_t pos=(song.playing ? TSEL->seq_idx : orbit_tape.cursor)%(len?len:1u), rec=song.rec!=0u;
+    uint32_t snap=song.playing && clk_beat%4u==0u && clk_pos<BEAT_U/4u, sig;
     char b[16];
-    const char *const labels[4]={"HEAD","IN","OUT","EDIT"};
     orbit_knob(4,0);
+    b[0]=0;
+    if(pl) {
+        fmt_int(b,(int32_t)pl); str_cpy(b+str_len(b),"/",sizeof b-str_len(b));
+        fmt_int(b+str_len(b),(int32_t)total);
+    }
+    ui_head("TAPE",C_WHITE,b,HEAD_BPM|(pl?HEAD_NOMSG:0u),&head);   /* (the list names the sound: no message) */
+    sig=pl*7919u+orbit_tape.revision+song.sel*17u+rec*97u+song.playing+snap*5u+pos*131u;
     for(i=0;i<NTRK;i++) {
         sig=sig*31u+trk[i].seq_idx+trk[i].p[P_MUTE]+trk[i].p[P_SLEN]*71u;
         for(j=0;j<NSTEP;j++) sig=sig*31u+trk_step_on(&trk[i],j);
     }
     sig=sig*31u+orbit_tape.cursor+orbit_tape.first*67u+orbit_tape.last*4099u;
-    sig=sig*31u+song.g[G_BPM]+ui.msg_t+orbit_tape.lift;
-    sig=sig*31u+(uint32_t)batt_shown();
-    if(!ui.force && cache==sig) return;
-    cache=sig;
-    cv_begin(240,24,C_BLACK);
-    cv_text(8,2,&FONT_S,"TAPE",C_WHITE); cv_text(64,2,&FONT_S,"EVENTS",TE_G3);
-    fmt_int(b,song.g[G_BPM]); cv_text(168,2,&FONT_S,b,TE_G4);
-    te_play_icon(196,2,song.playing); draw_battery(0); cv_blit(0,0);
-    if(pl) {
-        /* PRESETS turned: the sounds around the one just loaded replace reels and lanes for a moment */
-        lcd_fill(0,24,240,8,C_BLACK);
-        cv_begin(240,124,C_BLACK); cv_oy=0; graph_browse(); cv_blit(0,32);
-        cv_begin(240,40,C_BLACK);
-        cv_text(8,12,&FONT_S,"PRESETS",TE_G3);
-        fmt_int(b,(int32_t)pl); str_cpy(b+str_len(b),"/",sizeof b-str_len(b));
-        fmt_int(b+str_len(b),(int32_t)total); cv_text(168,12,&FONT_S,b,TE_G4);
-        cv_blit(0,156);
-    } else {
-    cv_begin(240,96,C_BLACK);
-    {
-        uint32_t pos=song.playing ? TSEL->seq_idx : orbit_tape.cursor, phase=(pos*89u)&1023u;
-        cv_line(54,15,186,15,TE_G2); cv_line(54,81,186,81,TE_G2);
-        orbit_reel(56,48,35,phase,TE_COL[0]); orbit_reel(184,48,35,phase,TE_COL[1]);
-        cv_line(81,72,107,86,TE_G4); cv_line(107,86,133,86,TE_G4); cv_line(133,86,159,72,TE_G4);
-        cv_rect(112,71,16,17,TE_G3); cv_rect(118,71,4,17,TE_COL[2]);
-        if(song.rec) te_disc(120,38,7,TE_RED); else te_play_icon(114,30,song.playing);
-    }
-    cv_blit(0,24);
-    cv_begin(240,60,C_BLACK);
-    for(i=0;i<NTRK;i++) {
-        int32_t y=(int32_t)i*15;
-        if(i==song.sel) cv_rect(0,y,240,14,TE_G1);
-        fmt_int(b,(int32_t)i+1); cv_text(6,y-1,&FONT_S,b,TE_COL[i]);
-        for(j=0;j<NSTEP;j++) {
-            int32_t x=30+(int32_t)j*3;
-            if(i==song.sel && j>=orbit_tape.first && j<=orbit_tape.last) cv_rect(x,y+1,3,12,TE_DIM[i]);
-            if(j<trk_len(&trk[i])) cv_rect(x,y+6,1,2,TE_G2);
-            if(j<trk_len(&trk[i]) && trk_step_on(&trk[i],j)) cv_rect(x,y+3,3,8,trk[i].p[P_MUTE]?TE_DIM[i]:TE_COL[i]);
-            if(song.playing && j==trk[i].seq_idx) cv_line(x,y+1,x,y+12,C_WHITE);
-            if(i==song.sel && j==orbit_tape.cursor) cv_rect(x,y+11,3,2,TE_COL[2]);
+    if(ui.force || cache!=sig) {
+        cache=sig;
+        if(pl) {
+            /* PRESETS turned: the sounds around the one just loaded replace reels and lanes for a moment */
+            lcd_fill(0,24,240,8,C_BLACK);
+            cv_begin(240,124,C_BLACK); cv_oy=0; graph_browse(); cv_blit(0,32);
+            lcd_fill(0,156,240,28,C_BLACK);
+        } else {
+            int32_t f=(int32_t)(pos*1000u/(len?len:1u)), pl_l=13+(1000-f)*17/1000, pl_r=13+f*17/1000, hy=snap?84:87;
+            uint32_t phase=(pos*89u)&1023u;
+            cv_begin(240,100,C_BLACK);
+            orbit_reel(56,46,35,pl_l,phase,TE_COL[0]); orbit_reel(184,46,35,pl_r,phase,TE_COL[1]);
+            /* the tape: off the bottom of each pack, round the head */
+            cv_line(56,46+pl_l,107,hy,TE_G4); cv_line(107,hy,133,hy,TE_G4); cv_line(133,hy,184,46+pl_r,TE_G4);
+            te_box(110,hy-14,20,16,rec?TE_RED:TE_G2,1);
+            cv_rect(118,hy-14,4,16,rec?C_WHITE:TE_COL[2]);
+            cv_blit(0,24);
+            cv_begin(240,60,C_BLACK);
+            for(i=0;i<NTRK;i++) {
+                int32_t y=(int32_t)i*15;
+                if(i==song.sel) cv_rect(0,y,240,14,TE_G1);
+                fmt_int(b,(int32_t)i+1); cv_text(6,y-1,&FONT_S,b,TE_COL[i]);
+                for(j=0;j<NSTEP;j++) {
+                    int32_t x=30+(int32_t)j*3;
+                    if(i==song.sel && j>=orbit_tape.first && j<=orbit_tape.last) cv_rect(x,y+1,3,12,TE_DIM[i]);
+                    if(j<trk_len(&trk[i])) cv_rect(x,y+6,1,2,TE_G2);
+                    if(j<trk_len(&trk[i]) && trk_step_on(&trk[i],j)) cv_rect(x,y+3,3,8,trk[i].p[P_MUTE]?TE_DIM[i]:TE_COL[i]);
+                    if(song.playing && j==trk[i].seq_idx) cv_line(x,y+1,x,y+12,C_WHITE);
+                    if(i==song.sel && j==orbit_tape.cursor) cv_rect(x,y+11,3,2,TE_COL[2]);
+                }
+            }
+            cv_blit(0,124);
         }
     }
-    cv_blit(0,120);
-    cv_begin(240,16,C_BLACK);
-    cv_text(8,0,&FONT_S,orbit_tape.lift ? "SEL+OCT- LIFT  SEL+OCT+ DROP" : "SEL+OCT- COPY  SEL+OCT+ DROP",TE_G4);
-    cv_blit(0,180);
+    {   /* the knobs (the lanes show where HEAD, IN and OUT are: no dials) */
+        static const char *const lab[4]={"HEAD","IN","OUT","EDIT"};
+        static char v[3][6];
+        const char *val[4]={v[0],v[1],v[2],orbit_tape.lift?"LIFT":"COPY"};
+        static const int32_t ratio[4]={NO_DIAL,NO_DIAL,NO_DIAL,NO_DIAL};
+        fmt_int(v[0],orbit_tape.cursor+1); fmt_int(v[1],orbit_tape.first+1); fmt_int(v[2],orbit_tape.last+1);
+        te_dials(184,lab,val,ratio,orbit_tape.lift,&dials);
     }
-    cv_begin(240,44,C_BLACK);
-    if(ui.msg_t) cv_text(4,14,&FONT_S,ui.msg,C_WHITE);
-    else for(i=0;i<4;i++) {
-        int32_t x=6+(int32_t)i*60;
-        cv_rect(x,0,48,1,TE_COL[i]); cv_text(x,2,&FONT_S,labels[i],TE_G3);
-        if(i<3) fmt_int(b,1+(i==0?orbit_tape.cursor:i==1?orbit_tape.first:orbit_tape.last));
-        else str_cpy(b,orbit_tape.lift?"LIFT":"COPY",sizeof b);
-        if(text_w(&FONT_L,b)<=52) cv_text(x,10,&FONT_L,b,TE_COL[i]);   /* the value large, as the OP-1 */
-        else cv_text(x,20,&FONT_S,b,TE_COL[i]);                         /* (a word: small) */
-    }
-    cv_blit(0,196);
 }

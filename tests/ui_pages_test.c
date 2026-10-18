@@ -763,9 +763,9 @@ int main(int argc, char **argv)
         TSEL->p[P_TFLT] = -32; ui.force = 1; frames(2); ppm("page-filter");
         check(!strcmp(ui.big_l[0], "FILT") && !strcmp(ui.big_v[0], "LP50") && !ui.big_l[1][0],
               "FILTER page: its one value drawn large (LP50 %)");
-        {   /* the big value in the graph strip: white pixels in the middle of the screen */
+        {   /* the big value in the body: its dial and value lit in the middle of the screen */
             uint32_t x, y, lit = 0;
-            for (y = Y_GRAPH + 30; y < Y_GRAPH + 90; y++)
+            for (y = 90; y < 200; y++)
                 for (x = 40; x < 200; x++)
                     lit += screen[y * 240u + x] != 0;
             check(lit > 300u, "FILTER page: the graph strip shows it");
@@ -1654,7 +1654,7 @@ int main(int argc, char **argv)
             uint16_t header[240 * 24];
             memcpy(header, screen, sizeof header);
             song.rec = 1u << TRK_DRUM; ui_draw();
-            check(memcmp(header, screen, sizeof header) && swap16(screen[9u * 240u + 196u]) == TE_RED,
+            check(memcmp(header, screen, sizeof header) && swap16(screen[11u * 240u + 191u]) == TE_RED,   /* (ui_head's REC dot) */
                   "GRID: REC state redraws a persistent red indicator");
         }
         ppm("review-grid-rec");
@@ -1674,7 +1674,7 @@ int main(int argc, char **argv)
         song_cursor = 0; studio_open(SC_SONG); ui.force = 1; ui_draw(); ppm("review-song-64");
         {
             uint32_t x, y, clear = 1;
-            for (y = 47; y < 64u; y++) for (x = 235; x < 240u; x++)
+            for (y = 33; y < 54u; y++) for (x = 235; x < 240u; x++)   /* (row 1: rows 30..55, its rules at 31, 54) */
                 clear &= swap16(screen[y * 240u + x]) == C_BLACK;
             check(clear, "SONG 64 bars: the label and playing marker leave the right edge clear");
         }

@@ -123,7 +123,7 @@ static void settings_init(void)
         settings.magic = SETTINGS_MAGIC;
         settings.palette = 5;                  /* ORBIT four-color style (default) */
         settings.lowcut = 0;
-        settings.zoom = 0;                     /* large readout of the touched value: off */
+        settings.zoom = 0;                     /* (kept in the saved settings; nothing reads it since the big values) */
     }
     palette_set(settings.palette);
     fx_lowcut = (uint8_t)(settings.lowcut != 0);
