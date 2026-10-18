@@ -100,11 +100,22 @@ static void orbit_sound_draw(void)
         /* Four coloured oscillator curves, driven by the active page values. */
         for(k=0;k<4;k++) {
             int32_t py=0;
+#if CV_AA
+            cv_curve_begin(22,TE_COL[k]);
+#endif
             for(x=0;x<216;x++) {
                 uint32_t phase=(x*(5u+(uint32_t)ratio[k]/100u)+k*128u)&1023u;
+#if CV_AA   /* 1/16 px: the curve no longer snaps to whole rows */
+                int32_t y=62*16+8+((SINE[phase]*(18+ratio[k]*30/1000))>>11);
+                cv_curve_pt(12+x,y); (void)py;
+#else
                 int32_t y=62+((SINE[phase]*(18+ratio[k]*30/1000))>>15);
                 if(x) cv_line(11+x,py,12+x,y,TE_COL[k]); py=y;
+#endif
             }
+#if CV_AA
+            cv_curve_end();
+#endif
         }
     }
     cv_blit(0,40);

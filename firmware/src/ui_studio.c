@@ -23,16 +23,33 @@ static int on_drum_page(void) { return !ui.home && cur_page()->scope == SC_DRUM;
 
 static void te_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)     /* filled circle */
 {
+#if CV_AA
+    cv_disc_q4(cx * 16 + 8, cy * 16 + 8, r * 16 + 8, c);
+#else
     int32_t y, x;
     for (y = -r; y <= r; y++)
         for (x = -r; x <= r; x++)
             if (x * x + y * y <= r * r + r)
                 cv_pset(cx + x, cy + y, c);
+#endif
 }
 /* a dial: a 270-degree ring (lit up to the value), a pointer; ratio 0..1000, -1 = a plain ring */
 static void te_dial(int32_t cx, int32_t cy, int32_t r, int32_t ratio, uint16_t c, uint16_t dim)
 {
-    int32_t i, end = ratio < 0 ? 768 : ratio * 768 / 1000;
+    int32_t end = ratio < 0 ? 768 : ratio * 768 / 1000;
+#if CV_AA
+    int32_t ccx = cx * 16 + 8, ccy = cy * 16 + 8, rad = r * 16 - 8;   /* the old band was r-2..r */
+    cv_arc_q4(ccx, ccy, rad, 40, 384u, 768u, ratio < 0 ? c : dim);
+    if (ratio >= 0 && end > 0)
+        cv_arc_q4(ccx, ccy, rad, 40, 384u, (uint32_t)end, c);
+    if (ratio >= 0) {
+        uint32_t a = (uint32_t)(384 + end) & 1023u;
+        int32_t co = SINE[(a + 256u) & 1023u], si = SINE[a];
+        cv_line_q4(ccx, ccy, ccx + ((co * (r - 4) * 16) >> 15), ccy + ((si * (r - 4) * 16) >> 15), 24, C_WHITE);
+        cv_disc_q4(ccx, ccy, 40, C_WHITE);
+    }
+#else
+    int32_t i;
     for (i = 0; i <= 768; i += 8) {
         uint32_t a = (uint32_t)(384 + i) & 1023u;
         int32_t co = SINE[(a + 256u) & 1023u], si = SINE[a], k;
@@ -46,6 +63,7 @@ static void te_dial(int32_t cx, int32_t cy, int32_t r, int32_t ratio, uint16_t c
         cv_line(cx, cy, cx + ((co * (r - 4)) >> 15), cy + ((si * (r - 4)) >> 15), C_WHITE);
         te_disc(cx, cy, 2, C_WHITE);
     }
+#endif
 }
 static void te_play_icon(int32_t x, int32_t y, int playing)
 {

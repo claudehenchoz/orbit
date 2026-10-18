@@ -31,12 +31,16 @@ static void orbit_edit(int drop)
 /* Circular graphics use the existing fixed-point sine table, without a framebuffer. */
 static void orbit_ring(int32_t cx,int32_t cy,int32_t r,uint16_t color)
 {
+#if CV_AA
+    cv_ring_q4(cx*16+8,cy*16+8,r*16,20,color);
+#else
     uint32_t a;
     for(a=0;a<1024;a+=16) {
         uint32_t next=(a+16)&1023u;
         cv_line(cx+((SINE[(a+256)&1023u]*r)>>15),cy+((SINE[a]*r)>>15),
                 cx+((SINE[(next+256)&1023u]*r)>>15),cy+((SINE[next]*r)>>15),color);
     }
+#endif
 }
 static void orbit_reel(int32_t cx,int32_t cy,int32_t r,uint32_t phase,uint16_t color)
 {

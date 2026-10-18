@@ -221,16 +221,28 @@ static void graph_adsr(const track_t *t, uint16_t c)
 
 static void graph_lfo(const track_t *t, uint16_t c)
 {
-    int32_t x, py = 50;
+    int32_t x, py = CV_AA ? 50 * 16 + 8 : 50;
     uint32_t ph = (uint32_t)t->p[P_LPHASE] << 25;
     for (x = 0; x < 240; x++) {                      /* (lfo_wave only reads the track) */
+#if CV_AA   /* 1/16 px */
+        int32_t y = 50 * 16 + 8 - lfo_wave((track_t *)t, ph + (uint32_t)x * (0xFFFFFFFFu / 120u)) * 38 / 2048;
+        if (t->p[P_LWAVE] == 4)
+            y = 50 * 16 + 8 - ((int32_t)((x / 20 * 2654435761u) >> 16) - 32768) * 38 / 2048;
+        if (!x)
+            cv_curve_begin(22, c);
+        cv_curve_pt(x, y);
+#else
         int32_t y = 50 - lfo_wave((track_t *)t, ph + (uint32_t)x * (0xFFFFFFFFu / 120u)) * 38 / 32768;
         if (t->p[P_LWAVE] == 4)
             y = 50 - ((int32_t)((x / 20 * 2654435761u) >> 16) - 32768) * 38 / 32768;
         if (x)
             cv_line(x - 1, py, x, y, c);
+#endif
         py = y;
     }
+#if CV_AA
+    cv_curve_end();
+#endif
     cv_line(0, 50, 239, 50, C_LINE);
 }
 

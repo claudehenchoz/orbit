@@ -81,6 +81,10 @@ static void vis_ellipse(int32_t cx, int32_t cy, int32_t rx, int32_t ry, uint16_t
 }
 static void vis_circle(int32_t cx, int32_t cy, int32_t r, uint16_t c)  /* an outline */
 {
+#if CV_AA
+    cv_ring_q4(cx * 16 + 8, cy * 16 + 8, r * 16, 18, c);
+    return;
+#endif
     int32_t x = r, y = 0, e = 1 - r;
     while (x >= y) {
         cv_pset(cx + x, cy + y, c), cv_pset(cx - x, cy + y, c), cv_pset(cx + x, cy - y, c), cv_pset(cx - x, cy - y, c);
