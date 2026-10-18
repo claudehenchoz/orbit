@@ -1,4 +1,11 @@
-# ORBIT
+# ORBIT (Claude's Hack)
+
+This is a complete hackjob of an attempt at making Orbit look cleaner. Don't download it.
+
+
+
+
+
 
 **Make a beat, shape three synths, then rearrange their events on Tape.**
 
