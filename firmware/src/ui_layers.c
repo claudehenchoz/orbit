@@ -627,10 +627,11 @@ static void tiles_draw(const tile_t *tl, uint32_t *cache)
         for (c = 0; c < 4u; c++) {
             const tile_t *t = &tl[r * 4u + c];
             int32_t x = 2 + (int32_t)c * 60;
-            uint32_t m;
-            cv_rect(x, 2, 56, 32, t->bg);
+            uint32_t m, idle = t->bg == TE_G1 || t->bg == TE_G2;
+            if (t->bg != C_BLACK)                       /* idle: an outline (OP-1); lit: filled */
+                te_box(x, 2, 56, 32, idle ? TE_G2 : t->bg, !idle);
             if (t->top)
-                cv_rect(x, 2, 56, 3, t->top);
+                cv_rect(x + 3, 4, 50, 2, t->top);
             te_text_c(x + 28, 9, t->lab, t->fg);
             for (m = 0; m < t->marks; m++)
                 cv_rect(x + 22 + (int32_t)m * 5, 27, 3, 3, t->fg);
@@ -669,9 +670,11 @@ static void punch_tiles_draw(const tile_t *tl, uint32_t *cache)
         for (c = 0; c < 4u; c++) {                      /* the white keys */
             const tile_t *t = &tl[r * 4u + c];
             int32_t x = 2 + (int32_t)c * 60;
-            cv_rect(x, 19, 56, 17, t->bg);
+            uint32_t idle = t->bg == TE_G1 || t->bg == TE_G2;
+            if (t->bg != C_BLACK)
+                te_box(x, 19, 56, 17, idle ? TE_G2 : t->bg, !idle);
             if (t->top)
-                cv_rect(x, 19, 56, 2, t->top);
+                cv_rect(x + 3, 20, 50, 1, t->top);
             te_text_c(x + 28, 20, t->lab, t->fg);
         }
         for (i = 16u; i < PUNCH_NFX; i++) {             /* the black keys of this row */
@@ -680,9 +683,8 @@ static void punch_tiles_draw(const tile_t *tl, uint32_t *cache)
             if ((uint32_t)w / 4u != r)
                 continue;
             x = w % 4 < 3 ? 60 * (w % 4 + 1) - PT_BW / 2 : 238 - PT_BW;
-            if (t->bg == C_BLACK)
-                cv_rect(x, 0, PT_BW, 17, TE_G2);         /* an outline: a black key on the black screen */
-            cv_rect(x + 1, 1, PT_BW - 2, 15, t->bg);
+            cv_rect(x - 1, 0, PT_BW + 2, 18, C_BLACK);  /* (a gap over the white keys' outlines) */
+            te_box(x, 0, PT_BW, 17, t->bg == C_BLACK ? TE_G1 : t->bg, 1);   /* a black key: a dark tile */
             te_text_c(x + PT_BW / 2, 1, t->lab, t->fg);
         }
         cv_blit(0, 40 + r * 36);
@@ -698,13 +700,16 @@ static void layer_title(const char *name, const char *sub, uint16_t col, uint32_
     *cache = sig;
     cv_begin(240, 40, C_BLACK);
     cv_text(4, 2, &FONT_L, name, col);
-    cv_text(4 + text_w(&FONT_L, name) + 10, 18, &FONT_S, ui.msg_t ? ui.msg : sub, ui.msg_t ? C_WHITE : TE_G3);
+    {
+        char s[28];
+        te_upfit(s, ui.msg_t ? ui.msg : sub, sizeof s, 232 - text_w(&FONT_L, name) - 10 - (locked ? 44 : 0));
+        cv_text(4 + text_w(&FONT_L, name) + 10, 18, &FONT_S, s, ui.msg_t ? C_WHITE : TE_G3);
+    }
     if (locked) {                                         /* locked open (HOME): any button lets it go */
         int32_t w = (int32_t)text_w(&FONT_S, "LOCK") + 8;
         cv_rect(236 - w, 4, w, 15, C_WHITE);
         cv_text(240 - w, 4, &FONT_S, "LOCK", C_BLACK);
     }
-    cv_rect(0, 38, 240, 1, TE_G1);
     cv_blit(0, 0);
 }
 

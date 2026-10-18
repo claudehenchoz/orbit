@@ -17,7 +17,7 @@
   @font-face { font-family: "Fukiai"; src: url("fukiai.ttf") format("truetype"); font-display: block; unicode-range: U+EA00-EB09; }
   :root {
     --bg: #000; --s1: #0b0b0e; --s2: #1a1a1e; --s3: #36363c; --line: #232329; --dim: #76767e; --fg2: #c4c4cc; --fg: #f2f2f2;
-    --red: #ff2c34; --t1: #287cff; --t2: #1ecc70; --t3: #ffffff; --t4: #ff621a; --trk: var(--t1);
+    --red: #ff3a5d; --t1: #698eff; --t2: #00ed95; --t3: #ffffff; --t4: #ff3a5d; --trk: var(--t1);
     --font: "SLOOP Terminus", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
     color-scheme: dark;
   }
@@ -6296,13 +6296,13 @@ function kitDrawWave(cv, p) {
   const w = cv.width = Math.max(60, cv.clientWidth || 200), h = cv.height = 48, g = cv.getContext("2d");
   g.clearRect(0, 0, w, h);
   const s = p.s, n = s.length, keep = kitLen(p) * (p.tune ? Math.pow(2, p.tune / 12) : 1);
-  const col = getComputedStyle(cv).getPropertyValue("--c") || "#ff621a";
+  const col = getComputedStyle(cv).getPropertyValue("--c") || "#ff3a5d";
   for (let x = 0; x < w; x++) {
     const a = Math.floor(x / w * n), b = Math.max(a + 1, Math.floor((x + 1) / w * n));
     let pk = 0;
     for (let i = a; i < b && i < n; i += 4) pk = Math.max(pk, Math.abs(s[i]));
     const y = Math.max(1, Math.round(pk / 32768 * (h / 2 - 2)));
-    g.fillStyle = a < keep ? col.trim() || "#ff621a" : "#36363c";
+    g.fillStyle = a < keep ? col.trim() || "#ff3a5d" : "#36363c";
     g.fillRect(x, h / 2 - y, 1, y * 2);
   }
 }

@@ -34,13 +34,13 @@ static void song_screen_draw(void)
     /* Draw one small band at a time: never exceed the 124-row canvas. */
     cv_begin(240, 40, C_BLACK);
     cv_text(4, 4, &FONT_L, "SONG", C_WHITE);
-    cv_text(76, 20, &FONT_S, arrangement_enabled ? "song mode" : "loop mode", arrangement_enabled ? SC[3] : RGB(118, 118, 126));
+    cv_text(4 + text_w(&FONT_L, "SONG") + 8, 20, &FONT_S, arrangement_enabled ? "SONG MODE" : "LOOP MODE", arrangement_enabled ? SC[3] : te_g[2]);
     fmt_int(b, song.g[G_BPM]);
     cv_text(236 - text_w(&FONT_S, b) - 28, 4, &FONT_S, b, C_WHITE);
-    cv_text(236 - 24, 4, &FONT_S, "bpm", RGB(118, 118, 126));
-    cv_text(236 - text_w(&FONT_S, song.playing ? "playing" : "stopped"), 20, &FONT_S,
-            song.playing ? "playing" : "stopped", song.playing ? SC[1] : RGB(118, 118, 126));
-    cv_rect(0, 39, 240, 1, RGB(26, 26, 30));
+    cv_text(236 - 24, 4, &FONT_S, "BPM", te_g[2]);
+    cv_text(236 - text_w(&FONT_S, song.playing ? "PLAYING" : "STOPPED"), 20, &FONT_S,
+            song.playing ? "PLAYING" : "STOPPED", song.playing ? SC[1] : te_g[2]);
+    cv_rect(0, 39, 240, 1, te_g[0]);
     cv_blit(0, 0);
     for (i = 0; i < 5u; i++) {
         uint32_t pos = start + i;
@@ -51,20 +51,20 @@ static void song_screen_draw(void)
             uint16_t sc = SC[e->scene & 3u];
             int32_t w;
             fmt_int(b, (int32_t)pos + 1);
-            cv_text(4, 5, &FONT_S, b, selected ? C_WHITE : RGB(118, 118, 126));
-            cv_rect(30, 3, 22, 20, used ? sc : RGB(26, 26, 30));   /* the section tile */
+            cv_text(4, 5, &FONT_S, b, selected ? C_WHITE : te_g[2]);
+            cv_rect(30, 3, 22, 20, used ? sc : te_g[0]);   /* the section tile */
             b[0] = (char)('A' + e->scene); b[1] = 0;
             cv_text(37, 5, &FONT_S, b, used ? C_BLACK : sc);
             w = e->bars * 92 / 64 + 4;                  /* reserve the label and playing marker, even at 64 bars */
-            cv_rect(60, 9, w, 8, used ? (selected ? sc : RGB(54, 54, 60)) : RGB(26, 26, 30));
+            cv_rect(60, 9, w, 8, used ? (selected ? sc : te_g[1]) : te_g[0]);
             fmt_int(b, e->bars);
-            str_cpy(b + str_len(b), e->bars == 1 ? " bar" : " bars", 8);
-            cv_text(60 + w + 6, 5, &FONT_S, used ? b : "empty", selected ? C_WHITE : RGB(118, 118, 126));
+            str_cpy(b + str_len(b), e->bars == 1 ? " BAR" : " BARS", 8);
+            cv_text(60 + w + 6, 5, &FONT_S, used ? b : "EMPTY", selected ? C_WHITE : te_g[2]);
             if (arrangement_clock.running && arrangement_clock.index == pos) {
                 cv_rect(60, 19, (int32_t)(arrangement_clock.bar + 1u) * w / (e->bars ? e->bars : 1), 2, C_WHITE);
                 cv_rect(226, 9, 9, 9, SC[1]);
             }
-            if (selected) cv_rect(0, 1, 240, 1, RGB(54, 54, 60)), cv_rect(0, 24, 240, 1, RGB(54, 54, 60));
+            if (selected) cv_rect(0, 1, 240, 1, te_g[1]), cv_rect(0, 24, 240, 1, te_g[1]);
         }
         cv_blit(0, 42 + 26u * i);
     }
@@ -73,14 +73,14 @@ static void song_screen_draw(void)
         cv_rect(0, 4, 240, 30, C_WHITE);
         cv_text((240 - text_w(&FONT_S, ui.msg)) / 2, 11, &FONT_S, ui.msg, C_BLACK);
     } else {
-        static const char *const L[4] = {"entry", "section", "bars", "length"};
+        static const char *const L[4] = {"ENTRY", "SECTION", "BARS", "LENGTH"};
         for (i = 0; i < 4u; i++) {
-            cv_rect((int32_t)i * 60 + 4, 6, 52, 3, SC[i]);
-            cv_text((int32_t)i * 60 + 30 - text_w(&FONT_S, L[i]) / 2, 12, &FONT_S, L[i], RGB(118, 118, 126));
+            cv_rect((int32_t)i * 60 + 4, 6, 52, 1, SC[i]);
+            cv_text((int32_t)i * 60 + 30 - text_w(&FONT_S, L[i]) / 2, 12, &FONT_S, L[i], te_g[2]);
         }
     }
-    cv_text(4, 34, &FONT_S, "rec: store   save: chain", RGB(196, 196, 204));
-    cv_text(4, 50, &FONT_S, "oct-: loop/song  oct+ x2: load", RGB(118, 118, 126));
+    cv_text(4, 34, &FONT_S, "REC: STORE   SAVE: CHAIN", te_g[3]);
+    cv_text(4, 50, &FONT_S, "OCT-: LOOP/SONG   OCT+ X2: LOAD", te_g[2]);
     cv_blit(0, 172);
 }
 

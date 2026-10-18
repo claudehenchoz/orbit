@@ -1413,10 +1413,10 @@ function editorTabs() {
   {   /* 2.4: the device's palette as tokens (:root), used through var(--...); outside them only #000 (text on a colour) */
     const css = html.slice(html.indexOf("<style>"), html.indexOf("</style>")).replace(/:root\s*\{[^}]*\}/g, "");
     const hex = [...css.matchAll(/#[0-9a-f]{3,6}\b/gi)].map((m) => m[0].toLowerCase()).filter((c) => c !== "#000");
-    ok(!hex.length && /--t1: #287cff; --t2: #1ecc70; --t3: #ffffff; --t4: #ff621a;/.test(html),
+    ok(!hex.length && /--t1: #698eff; --t2: #00ed95; --t3: #ffffff; --t4: #ff3a5d;/.test(html),
       "editor: the track colours of the device (ui_studio.c TE_COL), colours only as tokens" + (hex.length ? ` (${hex.join(" ")})` : ""));
     const te = readFileSync(join(HERE, "../firmware/src/gfx.c"), "utf8").replaceAll(",", ", ");
-    ok(te.replace(/\s+/g, "").includes("{RGB(40,124,255),RGB(30,204,112),RGB(255,255,255),RGB(255,98,26)}"),
+    ok(te.replace(/\s+/g, "").includes("{RGB(105,142,255),RGB(0,237,149),RGB(255,255,255),RGB(255,58,93)}"),
       "editor: default ORBIT track colors match the firmware TRACK_STYLES");
     ok(/SLOOP-FONT\*\/url\(data:font\/ttf;base64,[A-Za-z0-9+\/=]{20000,}\)/.test(html), "editor: the device's Terminus font inlined (tools/gen_webfont.py)");
   }

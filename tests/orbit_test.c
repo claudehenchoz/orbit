@@ -109,16 +109,23 @@ static void tap(uint32_t b) { press(b); release(b); }
 static void key(uint32_t k) { fm1_in.notes |= 1u << k; frame(); fm1_in.notes &= ~(1u << k); frame(); }
 static int fails;
 static void check(int ok, const char *what) { printf("ui: %-74s %s\n", what, ok ? "ok" : "FAIL"); fails += !ok; }
-/* 사운드 페이지 헤더 둘째 줄(y 20..35)의 모듈 칸 cell(x 8 + 58 cell 부터 56 px)에 있는 순백 픽셀 수: 현재 모듈 칸만 흰색이다 */
+/* a screen pixel brighter than colour dim in every channel: anti-aliased text only darkens its colour, so on black
+ * this is white text and never text in dim (thin anti-aliased strokes seldom reach pure white) */
+static int brighter(uint16_t screen_px, uint16_t dim)
+{
+    uint16_t p = swap16(screen_px);
+    return (p >> 11) > (dim >> 11) && ((p >> 5) & 63u) > ((dim >> 5) & 63u) && (p & 31u) > (dim & 31u);
+}
+/* 사운드 페이지 헤더 둘째 줄(y 20..35)의 모듈 칸 cell(x 8 + 58 cell 부터 56 px)에 있는 흰 글자 픽셀 수: 현재 모듈 칸만 흰색이다 */
 static uint32_t strip_white(uint32_t cell)
 {
     uint32_t x, y, n = 0;
-    for (y = 20; y < 36u; y++) for (x = 8 + cell * 58u; x < 8 + cell * 58u + 56u; x++) n += screen[y * 240u + x] == 0xFFFFu;
+    for (y = 20; y < 36u; y++) for (x = 8 + cell * 58u; x < 8 + cell * 58u + 56u; x++) n += brighter(screen[y * 240u + x], TE_G3);
     return n;
 }
 
 /* the seven PRESETS list rows as graph_browse draws them from screen row y0 (canvas row 4 + 17 per row): the name
- * column's lit pixels and its pure white ones (the current row only) */
+ * column's lit pixels and its white text ones, brighter than C_GRAY (the current row only) */
 static void list_rows(uint32_t y0, uint32_t lit[7], uint32_t white[7])
 {
     uint32_t r, x, y;
@@ -127,7 +134,7 @@ static void list_rows(uint32_t y0, uint32_t lit[7], uint32_t white[7])
         for (y = y0 + 4u + r * 17u; y < y0 + 18u + r * 17u; y++)
             for (x = 54; x < 236u; x++) {
                 lit[r] += screen[y * 240u + x] != swap16(C_BLACK);
-                white[r] += screen[y * 240u + x] == swap16(C_WHITE);
+                white[r] += brighter(screen[y * 240u + x], C_GRAY);
             }
     }
 }
@@ -619,8 +626,8 @@ int main(int argc, char **argv)
         if(i>=4u) { char n[40]; snprintf(n,sizeof n,"orbit-style-%s",PALETTES[i].name); ppm(n); }
         check(i!=4u || (TE_COL[0]>>11)==((TE_COL[0]>>5)&63u)/2u,"MONO uses gray track colors");
         /* 기본 ORBIT 팔레트는 오리지널 OP-1의 encoder 순서 blue / green / white / orange; PASTEL·NEON은 자기 셋째 색을 지킨다 */
-        check(i!=5u || (TE_COL[0]==RGB(40,124,255) && TE_COL[1]==RGB(30,204,112) && TE_COL[2]==C_WHITE && TE_COL[3]==RGB(255,98,26)),
-              "ORBIT encoders are blue, green, white, orange");
+        check(i!=5u || (TE_COL[0]==RGB(105,142,255) && TE_COL[1]==RGB(0,237,149) && TE_COL[2]==C_WHITE && TE_COL[3]==RGB(255,58,93)),
+              "ORBIT encoders are the OP-1's blue, green, white, red");
         check((i!=6u && i!=7u) || TE_COL[2]!=C_WHITE,"PASTEL and NEON keep their own third colour");
         ui.menu=1; ui.menu_sel=MI_COLOR; ui.force=1; frame(); ui.menu=0;
     }

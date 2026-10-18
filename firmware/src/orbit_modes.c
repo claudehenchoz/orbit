@@ -16,9 +16,12 @@ static uint32_t orbit_module_of(const page_t *pg)
  * ORBIT에 없으므로 표시하지 않는다 */
 static void orbit_module_strip(uint32_t active)
 {
-    static const char *const MOD[4]={"T1 edit","T2 env","T3 fx","T4 lfo"};
+    static const char *const MOD[4]={"T1 EDIT","T2 ENV","T3 FX","T4 LFO"};
     uint32_t k;
-    for(k=0;k<4;k++) cv_text(8+(int32_t)k*58,20,&FONT_S,MOD[k],k==active?C_WHITE:TE_G3);
+    for(k=0;k<4;k++) {                          /* the current module: white, underlined in its encoder's colour */
+        cv_text(8+(int32_t)k*58,18,&FONT_S,MOD[k],k==active?C_WHITE:TE_G3);
+        if(k==active) cv_rect(8+(int32_t)k*58,34,text_w(&FONT_S,MOD[k]),1,TE_COL[k]);
+    }
 }
 static void orbit_sound_draw(void)
 {
@@ -27,7 +30,7 @@ static void orbit_sound_draw(void)
     const engine_t *engine=ENGINES[TSEL->eng_req%NENGINES];
     int lfo_off = !TSEL->p[P_LD_PIT] && !TSEL->p[P_LD_FLT] && !TSEL->p[P_LD_SHP] && !TSEL->p[P_LD_AMP];
     const param_desc_t *desc[4];
-    char value[4][16], label[4][8], small[8], title[24];
+    char value[4][16], label[4][12], small[16], title[24];
     int32_t ratio[4]; uint32_t k,x,sig=ui.page+TSEL->eng_req*71u+song.sel*65537u;
     for(k=0;k<4;k++) {
         int16_t *vp; const char *unit;
@@ -71,11 +74,14 @@ static void orbit_sound_draw(void)
         orbit_ring(192,34,17+ratio[2]*12/1000,TE_COL[2]);
         orbit_ring(192,34,8+ratio[3]*8/1000,TE_COL[3]);
     } else if(pg->scope==SC_ENGINE && (TSEL->eng_req==4 || TSEL->eng_req==8)) {
-        cv_text(8,0,&FONT_S,"output",TE_G3);
-        for(k=0;k<4;k++) for(x=0;x<54;x++) {
-            uint32_t p=(scope_w+x*2u+k*108u)&(SCOPE_N-1u),next=(p+2)&(SCOPE_N-1u);
-            cv_line(12+k*54+x,62+scope_buf[p]*45/32768,
-                    13+k*54+x,62+scope_buf[next]*45/32768,TE_COL[k]);
+        cv_text(8,0,&FONT_S,"OUTPUT",TE_G3);
+        for(k=0;k<4;k++) {                      /* (a column a sample, 1/16 px: as cheap loud as quiet) */
+            cv_curve_begin(22,TE_COL[k]);
+            for(x=0;x<=54;x++) {
+                uint32_t p=(scope_w+x*2u+k*108u)&(SCOPE_N-1u);
+                cv_curve_pt(12+(int32_t)(k*54+x),62*16+8+scope_buf[p]*45*16/32768);
+            }
+            cv_curve_end();
         }
         cv_line(14,114,226,114,TE_G2);
     } else if(pg->scope==SC_ENGINE && (TSEL->eng_req==1 || TSEL->eng_req==2 || TSEL->eng_req==6)) {
@@ -119,16 +125,21 @@ static void orbit_sound_draw(void)
         }
     }
     cv_blit(0,40);
-    cv_begin(240,32,C_BLACK);
-    for(k=0;k<4;k++) { te_dial(30+k*60,16,13,ratio[k],TE_COL[k],TE_DIM[k]); }
+    cv_begin(240,24,C_BLACK);
+    for(k=0;k<4;k++) { if(label[k][0]) te_dial(30+k*60,12,10,ratio[k],TE_COL[k],TE_DIM[k]); }
     cv_blit(0,164);
-    cv_begin(240,44,C_BLACK);
-    if(ui.msg_t) cv_text(4,14,&FONT_S,ui.msg,C_WHITE);
+    /* as the OP-1: under each dial its label, small, then the value large and thin in the knob's colour
+     * (a value too wide for the large type: small, on the same line) */
+    cv_begin(240,52,C_BLACK);
+    if(ui.msg_t) cv_text((240-text_w(&FONT_S,ui.msg))/2,18,&FONT_S,ui.msg,C_WHITE);
     else for(k=0;k<4;k++) {
-        str_cpy(small,label[k],7); cv_text(6+k*60,2,&FONT_S,small,TE_G3);
-        str_cpy(small,value[k],7); cv_text(6+k*60,23,&FONT_S,small,TE_COL[k]);
+        int32_t cx=30+(int32_t)k*60; uint16_t vc=ui.hot_t && ui.hot_col==k?C_WHITE:TE_COL[k];
+        te_upfit(small,label[k],sizeof small,58); te_text_c(cx,0,small,TE_G3);
+        te_upfit(small,value[k],sizeof small,58);
+        if(text_w(&FONT_L,small)<=58) cv_text(cx-text_w(&FONT_L,small)/2,14,&FONT_L,small,vc);
+        else te_text_c(cx,26,small,vc);
     }
-    cv_blit(0,196);
+    cv_blit(0,188);
 }
 
 /* 믹서(GLO): 오리지널 OP-1 Mixer T1처럼 네 개의 색 level 바와 네 knob = 트랙 1..4 level(드럼은 G_DRLVL). SELECT로
@@ -146,12 +157,12 @@ static void orbit_mixer_draw(void)
     if(ui.force || sig!=cache) {
         cache=sig;
         cv_begin(240,36,C_BLACK);
-        cv_text(8,2,&FONT_S,song.rec?"REC / NO AUTO":"mixer",C_WHITE); fmt_int(b,song.g[G_BPM]); cv_text(178,2,&FONT_S,b,TE_G3);
+        cv_text(8,2,&FONT_S,song.rec?"REC / NO AUTO":"MIXER",song.rec?TE_RED:C_WHITE); fmt_int(b,song.g[G_BPM]); cv_text(178,2,&FONT_S,b,TE_G3);
         draw_battery(0);
         if(kind==MX_TRACK) {                        /* 둘째 줄: 이 페이지의 네 knob과 SELECT가 가는 곧 */
-            str_cpy(hint,"track ",sizeof hint); fmt_int(hint+6,(int32_t)song.sel+1);
-            str_cpy(hint+str_len(hint)," / select: pan",sizeof hint-str_len(hint));
-        } else str_cpy(hint,pan?"pan 1-4 / select: level":"level 1-4 / select: pan",sizeof hint);
+            str_cpy(hint,"TRACK ",sizeof hint); fmt_int(hint+6,(int32_t)song.sel+1);
+            str_cpy(hint+str_len(hint),"   SELECT: PAN",sizeof hint-str_len(hint));
+        } else str_cpy(hint,pan?"PAN 1-4   SELECT: LEVEL":"LEVEL 1-4   SELECT: PAN",sizeof hint);
         cv_text(8,20,&FONT_S,hint,TE_G3); cv_blit(0,0);
         cv_begin(240,124,C_BLACK);
         if(pl_shown()) { cv_oy=0; graph_browse(); }   /* PRESETS turned: the sounds around the one just loaded */
@@ -176,7 +187,7 @@ static void orbit_mixer_draw(void)
         cv_blit(0,36);
         cv_begin(240,24,C_BLACK);
         for(k=0;k<NTRK;k++) {                       /* 열의 이름: 트랙의 엔진(드럼 트랙은 drum) */
-            te_lower(b,is_drum(&trk[k])?"DRUM":ENGINES[trk[k].eng_req%NENGINES]->name,8);
+            te_upfit(b,is_drum(&trk[k])?"DRUM":ENGINES[trk[k].eng_req%NENGINES]->name,sizeof b,58);
             te_text_c(30+(int32_t)k*60,2,b,k==song.sel?TE_G4:TE_G3);
         }
         cv_blit(0,160);

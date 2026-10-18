@@ -4,6 +4,7 @@
  * footer (steps + engine / preset / page). */
 static void draw_menu(void);
 static uint32_t str_hash(uint32_t h, const char *s);
+static int dial_columns(void);
 
 /* --------------------------------------------------------- drawing --- */
 static int is_eng_name(const char *s)                 /* one of the ENGINES[]->name strings */
@@ -125,12 +126,18 @@ static void draw_frame(void)
         lcd_fill(i * 60u, Y_LABEL, 4, Y_SEP_END - Y_LABEL, C_BLACK);
     lcd_fill(0, H_HEAD, 240, 1, C_LINE);
     lcd_fill(0, Y_FOOT - 2, 240, 1, C_LINE);
-    for (i = 1; i < 4u; i++)
-        lcd_fill(i * 60u - 1u, H_HEAD + 4, 1, Y_SEP_END - H_HEAD - 4, C_LINE);
+    for (i = 1; i < 4u; i++)                            /* (the dials of a big-value page stand alone) */
+        lcd_fill(i * 60u - 1u, H_HEAD + 4, 1, Y_SEP_END - H_HEAD - 4, dial_columns() ? C_BLACK : C_LINE);
 }
 
+static int big_page(const page_t *pg);
+static int dial_columns(void)                       /* a big-value page: the columns are only the knobs' dials */
+{
+    return !ui.home && big_page(cur_page()) && !(is_drum(TSEL) && !page_for_drum(cur_page()));
+}
 /* one column: [icon] LABEL / value unit / gauge, redrawn only when it changed.
- * ratio: 0..1000 for the gauge, -1 = no gauge. icon: ICON_* (icons.c), ICON_AUTO = by label */
+ * ratio: 0..1000 for the gauge, -1 = no gauge. icon: ICON_* (icons.c), ICON_AUTO = by label.
+ * On a big-value page (its values large below) the column is the knob's dial alone, as the OP-1 */
 #define LABEL_X (FELUCCA_ICONS ? ICON_CELL + ICON_GAP : 0)
 static void draw_column(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc,
                         int32_t ratio, uint32_t icon)
@@ -152,10 +159,13 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
         key[n] = (char)('A' + (vc == C_WHITE) + (vc == C_DIM) * 2);
         key[n + 1] = (char)(' ' + (ratio < 0 ? 0 : 1 + ratio / 20));
         key[n + 2] = (char)(icon == ICON_NONE ? '~' : '!' + icon % 90u);   /* same label, other icon */
-        key[n + 3] = 0;
+        key[n + 3] = (char)('0' + dial_columns());
+        key[n + 4] = 0;
     }
-    if (c < 4u) {                                       /* (the big values: their own fit) */
-        str_cpy(ui.big_l[c], l, 8);
+    if (c < 4u) {                                       /* (the big values: their own fit, the label too) */
+        str_cpy(ui.big_l[c], label, 8);
+        while (ui.big_l[c][0] && text_w(&FONT_S, ui.big_l[c]) > 104)
+            ui.big_l[c][str_len(ui.big_l[c]) - 1u] = 0;
         fit(ui.big_v[c], val, &FONT_L, 112 - (unit[0] ? 4 : 0));
         str_cpy(ui.big_u[c], unit, 8);
         ui.big_c[c] = vc;
@@ -169,11 +179,22 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
         return;
     str_cpy(ui.col[c], key, sizeof ui.col[c]);
     cv_begin(55, Y_SEP_END - Y_LABEL, C_BLACK);         /* x 4..58: the rule at 59 stays */
+    if (dial_columns()) {
+        if (l[0])
+            te_dial(26, 20, 15, ratio, vc == C_DIM ? TE_G2 : TE_COL[c & 3u], TE_DIM[c & 3u]);
+        cv_blit(c * 60u + 4u, Y_LABEL);
+        return;
+    }
     if (FELUCCA_ICONS && icon != ICON_NONE && l[0])
         cv_icon(0, 1, icon, TE_COL[c & 3u]);            /* icon rows 1..10 = the label's cap height */
     cv_text(l[0] ? LABEL_X : 0, 0, &FONT_S, l, C_GRAY);
-    x = cv_text(0, Y_VALUE - Y_LABEL, &FONT_S, v, vc);
-    cv_text(x + 3, Y_VALUE - Y_LABEL, &FONT_S, u, C_DIM);
+    if (text_w(&FONT_L, v) + (u[0] ? text_w(&FONT_S, u) + 3 : 0) <= 54) {   /* the value large, as the OP-1 */
+        x = cv_text(0, 9, &FONT_L, v, vc);
+        cv_text(x + 3, Y_VALUE - Y_LABEL + 2, &FONT_S, u, C_DIM);
+    } else {
+        x = cv_text(0, Y_VALUE - Y_LABEL, &FONT_S, v, vc);
+        cv_text(x + 3, Y_VALUE - Y_LABEL, &FONT_S, u, C_DIM);
+    }
     if (ratio >= 0) {                                   /* gauge: track, fill, 1 px end line */
         int32_t gy = Y_GAUGE - Y_LABEL;
         fx = ratio * gw / 1000;

@@ -46,7 +46,8 @@ assets, is entirely governed by the GPL.
 | --- | --- | --- |
 | Instrument and drum samples (Versilian Studios VSCO-2 CE, VCSL; Sonic Pi: SCRCH) | CC0 1.0 | `assets/samples-cc0/`, provenance in `ATTRIBUTION.txt` there |
 | New synthesized FLUTE/SCRCH replacement waveforms (separate from the original CC0 recordings) | GPL-3.0-only | Deterministic waveform generation in `tools/gen_samples.py` |
-| Terminus font 8x16 (ter-u16n): the FM-1's screen, and the web editor's font (`tools/gen_webfont.py` makes it a TrueType font inlined in `web/editor.html`) | SIL OFL 1.1 | `assets/fonts/ter-u16n.bdf`, `assets/fonts/Terminus-LICENSE.txt` |
+| Inter by The Inter Project Authors (<https://github.com/rsms/inter>): the FM-1's screen fonts. Static ExtraLight instances (weight 200, optical sizes 14 and 32), subset to Latin-1, tabular digits frozen into the character map, made from Inter 4.001 by `tools/make_inter.py` | SIL OFL 1.1 | `assets/fonts/Inter-ExtraLight-S.ttf`, `assets/fonts/Inter-ExtraLight-L.ttf`, `assets/fonts/Inter-LICENSE.txt` |
+| Terminus font 8x16 (ter-u16n): the web editor's font (`tools/gen_webfont.py` makes it a TrueType font inlined in `web/editor.html`) | SIL OFL 1.1 | `assets/fonts/ter-u16n.bdf`, `assets/fonts/Terminus-LICENSE.txt` |
 | Fukiai icon font (Hügelton Instruments), web editor only | MIT | `web/fukiai.ttf`, `web/FUKIAI-LICENSE.txt` |
 | CrispyZebra by Leo Kuroshita (<https://github.com/hugelton/CrispyZebra>): the PHASE engine's waveforms are a C port of its oscillator | GPL-3.0 | `firmware/src/eng_phase.c` |
 | klattsch by Tony Gies (<https://github.com/tgies/klattsch>): design reference for the VOICE (formant) engine; no code copied. Formant data from Klatt (1980) / Hillenbrand et al. (1995) | MIT (klattsch) | credit only |

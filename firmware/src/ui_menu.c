@@ -101,7 +101,7 @@ static void draw_menu(void)
             cv_text(4, 104, &FONT_S, "HUGELTON.COM", C_AMB);
             cv_text(4, 119, &FONT_S, "GPL-3.0, NO WARRANTY", C_HI);
             cv_text(4, 132, &FONT_S, "GITHUB.COM/DSPAUDIO/ORBIT", C_AMB);   /* (the source of this firmware) */
-            cv_text(4, 146, &FONT_S, "FONT: TERMINUS (OFL)", C_DIM);
+            cv_text(4, 146, &FONT_S, "FONT: INTER (OFL)", C_DIM);
             cv_text(4, 159, &FONT_S, "SAMPLES: VERSILIAN (CC0)", C_DIM);
             cv_text(4, 172, &FONT_S, "+ SONIC PI (CC0)", C_DIM);
             cv_text(4, 185, &FONT_S, "PHASE: CRISPYZEBRA (GPL)", C_DIM);
@@ -110,11 +110,11 @@ static void draw_menu(void)
             int32_t x = 4;
             uint32_t rows = MS_FIRST[sec + 1u] - MS_FIRST[sec];
             int32_t dy = rows > 3u ? 48 : MI_DY;
-            for (i = 0; i < MS_COUNT; i++) {        /* the sections as tabs: this one lit */
+            for (i = 0; i < MS_COUNT; i++) {        /* the sections as tabs: this one white, underlined */
                 int32_t w = text_w(&FONT_S, MS_NAME[i]);
                 if (i == sec)
-                    cv_rect(x - 2, 3, w + 4, 18, C_LINE);
-                cv_text(x, 4, &FONT_S, MS_NAME[i], i == sec ? C_WHITE : C_DIM);
+                    cv_rect(x, 20, w, 1, C_WHITE);
+                cv_text(x, 3, &FONT_S, MS_NAME[i], i == sec ? C_WHITE : C_DIM);
                 x += w + 10;
             }
             for (i = MS_FIRST[sec]; i < MS_FIRST[sec + 1u]; i++) {
@@ -124,7 +124,9 @@ static void draw_menu(void)
                 uint16_t vc;
                 const char *v = mi_value(i, &vc);
                 char k[4] = {'K', (char)('1' + r), 0, 0};
-                cv_rect(4, y + 2, 4, dy - 8, cur ? C_WHITE : TE_COL[r & 3u]);   /* the knob's colour */
+                cv_rect(5, y + 3, 1, dy - 10, cur ? C_WHITE : TE_COL[r & 3u]);   /* the knob's colour */
+                if (cur)
+                    te_disc(5, y + 2, 2, C_WHITE);
                 xv = cv_text(14, y, &FONT_S, k, TE_COL[r & 3u]);
                 cv_text(xv + 6, y, &FONT_S, MI_NAME[i], cur ? C_WHITE : C_GRAY);
                 if (v[0] && text_w(&FONT_L, v) <= 222) {

@@ -14,10 +14,10 @@ static void draw_battery(int usb_label);
 static int on_drum_page(void) { return !ui.home && cur_page()->scope == SC_DRUM; }
 
 /* ---------------------------------------------------------------- style --- */
-#define TE_G1 RGB(26, 26, 30)            /* tiles */
-#define TE_G2 RGB(54, 54, 60)            /* empty steps, dial tracks */
-#define TE_G3 RGB(118, 118, 126)         /* labels */
-#define TE_G4 RGB(196, 196, 204)         /* secondary text */
+#define TE_G1 te_g[0]                    /* tiles (gfx.c palette_set: lavender with ORBIT) */
+#define TE_G2 te_g[1]                    /* empty steps, dial tracks, tile outlines */
+#define TE_G3 te_g[2]                    /* labels */
+#define TE_G4 te_g[3]                    /* secondary text */
 #define TE_RED te_alert          /* recording, erasing */
 #define TE_DRUM TE_COL[3]
 
@@ -33,20 +33,22 @@ static void te_disc(int32_t cx, int32_t cy, int32_t r, uint16_t c)     /* filled
                 cv_pset(cx + x, cy + y, c);
 #endif
 }
-/* a dial: a 270-degree ring (lit up to the value), a pointer; ratio 0..1000, -1 = a plain ring */
+/* a dial, as the OP-1's encoders: a hairline 270-degree track, the value lit along it in the colour,
+ * a fine white needle; ratio 0..1000, -1 = a plain ring */
 static void te_dial(int32_t cx, int32_t cy, int32_t r, int32_t ratio, uint16_t c, uint16_t dim)
 {
     int32_t end = ratio < 0 ? 768 : ratio * 768 / 1000;
 #if CV_AA
-    int32_t ccx = cx * 16 + 8, ccy = cy * 16 + 8, rad = r * 16 - 8;   /* the old band was r-2..r */
-    cv_arc_q4(ccx, ccy, rad, 40, 384u, 768u, ratio < 0 ? c : dim);
+    int32_t ccx = cx * 16 + 8, ccy = cy * 16 + 8, rad = r * 16 - 12;
+    (void)dim;
+    cv_arc_q4(ccx, ccy, rad, 14, 384u, 768u, ratio < 0 ? c : TE_G2);
     if (ratio >= 0 && end > 0)
-        cv_arc_q4(ccx, ccy, rad, 40, 384u, (uint32_t)end, c);
+        cv_arc_q4(ccx, ccy, rad, 30, 384u, (uint32_t)end, c);
     if (ratio >= 0) {
         uint32_t a = (uint32_t)(384 + end) & 1023u;
         int32_t co = SINE[(a + 256u) & 1023u], si = SINE[a];
-        cv_line_q4(ccx, ccy, ccx + ((co * (r - 4) * 16) >> 15), ccy + ((si * (r - 4) * 16) >> 15), 24, C_WHITE);
-        cv_disc_q4(ccx, ccy, 40, C_WHITE);
+        cv_line_q4(ccx, ccy, ccx + ((co * (r - 5) * 16) >> 15), ccy + ((si * (r - 5) * 16) >> 15), 18, C_WHITE);
+        cv_disc_q4(ccx, ccy, 28, C_WHITE);
     }
 #else
     int32_t i;
@@ -87,6 +89,31 @@ static void te_text_c(int32_t cx, int32_t y, const char *s, uint16_t c)   /* cen
 {
     cv_text(cx - text_w(&FONT_S, s) / 2, y, &FONT_S, s, c);
 }
+/* d = s in capitals, cut (by width, not letters) to maxw pixels of the small font */
+static void te_upfit(char *d, const char *s, uint32_t n, int32_t maxw)
+{
+    uint32_t i;
+    for (i = 0; i + 1u < n && s[i]; i++)
+        d[i] = s[i] >= 'a' && s[i] <= 'z' ? (char)(s[i] - 32) : s[i];
+    d[i] = 0;
+    while (d[0] && text_w(&FONT_S, d) > maxw)
+        d[str_len(d) - 1u] = 0;
+}
+/* a box as the OP-1 draws them: an outline in a quiet colour, or filled (lit) with its corners
+ * taken off */
+static void te_box(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c, int filled)
+{
+    if (filled) {
+        cv_rect(x + 1, y, w - 2, h, c);
+        cv_rect(x, y + 1, 1, h - 2, c);
+        cv_rect(x + w - 1, y + 1, 1, h - 2, c);
+        return;
+    }
+    cv_rect(x, y, w, 1, c);
+    cv_rect(x, y + h - 1, w, 1, c);
+    cv_rect(x, y + 1, 1, h - 2, c);
+    cv_rect(x + w - 1, y + 1, 1, h - 2, c);
+}
 
 /* the dial strip: KNOB 1..4, label + value under each (a dial with no label: an empty column); a
  * message replaces it */
@@ -102,25 +129,31 @@ static void te_dials(int32_t y0, const char *const lab[4], const char *const val
     if (!ui.force && sig == *cache)
         return;
     *cache = sig;
-    cv_begin(240, ui.msg_t ? 240u - (uint32_t)y0 : 40u, C_BLACK);
+    cv_begin(240, 240u - (uint32_t)y0, C_BLACK);
     if (ui.msg_t) {                                     /* a message: a white bar */
         cv_rect(0, 10, 240, 32, C_WHITE);
         cv_text((240 - text_w(&FONT_S, ui.msg)) / 2, 18, &FONT_S, ui.msg, C_BLACK);
         cv_blit(0, (uint32_t)y0);
         return;
     }
+    /* as the OP-1: a small dial, its label, then the value large and thin in the knob's colour (white
+     * while turned); a value too wide for the large type is small, on the same line */
     for (k = 0; k < 4u; k++) {
         int32_t cx = 30 + 60 * (int32_t)k;
-        if (!lab[k][0])
-            continue;
-        te_dial(cx, 12, 11, ratio[k], TE_COL[k], TE_DIM[k]);
-        te_text_c(cx, 24, lab[k], TE_G3);
+        uint16_t vc = ui.hot_t && ui.hot_col == k ? C_WHITE : TE_COL[k];
+        char l[12];
+        if (lab[k][0]) {
+            te_dial(cx, 9, 9, ratio[k], TE_COL[k], TE_DIM[k]);
+            te_upfit(l, lab[k], sizeof l, 58);
+            te_text_c(cx, 15, l, TE_G3);
+        }
+        te_upfit(l, val[k], sizeof l, 58);
+        if (text_w(&FONT_L, l) <= 58)
+            cv_text(cx - text_w(&FONT_L, l) / 2, 24, &FONT_L, l, vc);
+        else
+            te_text_c(cx, 32, l, vc);
     }
     cv_blit(0, (uint32_t)y0);
-    cv_begin(240, 16, C_BLACK);                         /* the values: white while turned */
-    for (k = 0; k < 4u; k++)
-        te_text_c(30 + 60 * (int32_t)k, 0, val[k], ui.hot_t && ui.hot_col == k ? C_WHITE : TE_G4);
-    cv_blit(0, (uint32_t)y0 + 40u);
 }
 
 static void studio_open(uint32_t scope)
@@ -184,28 +217,29 @@ static void te_header(const char *title, uint16_t tc, uint32_t *cache)
     cv_begin(240, 40, C_BLACK);
     fmt_int(b, song.g[G_BPM]);
     cv_text(4, 4, &FONT_L, b, ui.bpm_t ? C_WHITE : TE_G4);
-    cv_text(4 + text_w(&FONT_L, b) + 4, 20, &FONT_S, "bpm", TE_G3);
+    cv_text(4 + text_w(&FONT_L, b) + 4, 20, &FONT_S, "BPM", TE_G3);
     te_play_icon(104, 6, (int)playing);
     if (playing) {                                     /* bar.beat in the selected track's loop */
         loop_pos(TSEL, b);
         cv_text(122, 5, &FONT_S, b, C_WHITE);
     } else {
-        cv_text(122, 5, &FONT_S, arrangement_enabled ? "song" : "loop", TE_G3);
+        cv_text(122, 5, &FONT_S, arrangement_enabled ? "SONG" : "LOOP", TE_G3);
     }
-    for (k = 0; k < 4u; k++)                           /* the four beats of the bar */
-        cv_rect(104 + (int32_t)k * 9, 26, 7, 7, playing && beat % 4u == k ? (k ? C_WHITE : TE_RED) : TE_G2);
+    for (k = 0; k < 4u; k++)                           /* the four beats of the bar: dots, the one lit */
+        te_disc(107 + (int32_t)k * 9, 29, 2, playing && beat % 4u == k ? (k ? C_WHITE : TE_RED) : TE_G2);
     if (song.rec) {
-        te_disc(224, 12, 8, TE_RED);
-        cv_text(176, 4, &FONT_S, "rec", TE_RED);
-        cv_text(176, 22, &FONT_S, "NO AUTO", TE_G3);       /* Mixer / KIT knobs are live controls */
+        te_disc(224, 12, 6, TE_RED);
+        cv_text(184, 4, &FONT_S, "REC", TE_RED);
+        cv_text(170, 22, &FONT_S, "NO AUTO", TE_G3);       /* Mixer / KIT knobs are live controls */
         if (song.g[G_CLOCK] != 0)                       /* the click is on */
-            cv_text(144, 22, &FONT_S, "CLK", TE_G3);
+            cv_text(138, 22, &FONT_S, "CLK", TE_G3);
     } else {
-        cv_text(240 - text_w(&FONT_S, title) - 4, 5, &FONT_S, title, tc);
+        char t[20];
+        te_upfit(t, title, sizeof t, 84);
+        cv_text(236 - text_w(&FONT_S, t), 5, &FONT_S, t, tc);
         if (song.solo)
-            cv_text(236 - text_w(&FONT_S, "solo"), 22, &FONT_S, "solo", C_WHITE);
+            cv_text(236 - text_w(&FONT_S, "SOLO"), 22, &FONT_S, "SOLO", C_WHITE);
     }
-    cv_rect(0, 39, 240, 1, TE_G1);
     cv_blit(0, 0);
 }
 
@@ -347,21 +381,11 @@ static void pads_tick(void)                             /* once a frame: the hit
         }
 }
 
-/* Compact row labels reuse the existing font, merging each pair of bitmap rows. */
-static void drum_row_text(int32_t x, int32_t y, const char *s, uint16_t c)
+/* Compact row labels (capitals and digits), centred in a tile w wide: the small font's cap
+ * height (9 px) is the row, so the cell is drawn from the top of 'H' (its first inked row). */
+static void drum_row_text(int32_t x, int32_t w, int32_t y, const char *s, uint16_t c)
 {
-    for (; *s; s++) {
-        uint32_t gi = glyph(&FONT_S, (uint8_t)*s), gx, gy, w = FONT_S.bw[gi];
-        const uint8_t *p = FONT_S.data + FONT_S.off[gi];
-        for (gy = 0; gy < 8u; gy++)
-            for (gx = 0; gx < w; gx++) {
-                uint32_t v = font_alpha(p, w, gx, gy * 2u, FONT_S.bpp) |
-                             font_alpha(p, w, gx, gy * 2u + 1u, FONT_S.bpp);
-                if (v >= 4u)
-                    cv_pset(x - FONT_S.pad + (int32_t)gx, y + (int32_t)gy, c);
-            }
-        x += FONT_S.adv[gi];
-    }
+    cv_text(x + (w - text_w(&FONT_S, s)) / 2, y - (int32_t)FONT_S.data[FONT_S.off[glyph(&FONT_S, 'H')]], &FONT_S, s, c);
 }
 static const char GRID_LABEL[DRUM_LANES][3] = {
     "BD", "B2", "SN", "CP", "CH", "OH", "PD", "RS",
@@ -408,8 +432,8 @@ static void drum_screen_draw(void)
             fmt_int(b, (int32_t)kit + 1);
             cv_text(19 - text_w(&FONT_S, b) / 2, 13, &FONT_S, b, C_BLACK);
             cv_text(44, 6, &FONT_L, DRUM_KIT_NAMES[kit], C_WHITE);
-            cv_text(202, 4, &FONT_S, "grid", TE_G3);
-            cv_text(202, 22, &FONT_S, "kit", C_WHITE);
+            cv_text(202, 4, &FONT_S, "GRID", TE_G3);
+            cv_text(202, 22, &FONT_S, "KIT", C_WHITE);
             cv_rect(196, 26, 3, 9, TE_DRUM);
             cv_blit(0, 40);
         }
@@ -433,7 +457,7 @@ static void drum_screen_draw(void)
                 for (i = 0; i < DRUM_LANES; i++) {
                     int32_t y = (int32_t)i * 10;
                     cv_rect(0, y, 20, 9, i == drum_lane ? TE_DRUM : C_BLACK);
-                    drum_row_text(2, y, GRID_LABEL[i], i == drum_lane ? C_BLACK : TE_G4);
+                    drum_row_text(0, 20, y, GRID_LABEL[i], i == drum_lane ? C_BLACK : TE_G4);
                     for (j = 0; j < 16u; j++) {
                         uint32_t p = bank * 16u + j, on, r;
                         const dstep_t *s = &TDRUM->dstep[p];
@@ -677,13 +701,13 @@ static void rec_rows(uint32_t rt, uint32_t take, uint32_t y0, uint32_t *cache)
         cv_rect(4, y + 3, 12, 12, armed ? TE_COL[i] : TE_DIM[i]);
         if (i == TRK_DRUM) str_cpy(b, DRUM_KIT_NAMES[drum_kit()], sizeof b);
         else trk_short_name(i, b);
-        b[10] = 0;
+        te_upfit(b, b, sizeof b, 100);                  /* cut by width, before the steps at 126 */
         cv_text(22, y + 1, &FONT_S, b, armed ? C_WHITE : TE_G3);
         for (j = 0; j < 16u; j++) {
             uint32_t a = j * len / 16u, z = (j + 1u) * len / 16u, k, on = 0;
             if (z == a) z = a + 1u;
             for (k = a; k < z && k < NSTEP; k++) if (trk_step_on(t, k)) on = 1;
-            cv_rect(106 + (int32_t)j * 8, y + 5, 6, 8, on ? (armed ? TE_COL[i] : TE_DIM[i]) : TE_G1);
+            cv_rect(126 + (int32_t)j * 7, y + 5, 5, 8, on ? (armed ? TE_COL[i] : TE_DIM[i]) : TE_G1);
         }
     }
     cv_blit(0, y0);

@@ -8,10 +8,10 @@ typedef struct {               /* proportional, see tools/gen_font.py */
     uint8_t pad;               /* bitmap starts this many pixels left of the pen */
     uint8_t first, last;
     uint8_t sh;                /* 1: the bitmaps are another font's, drawn at 2x (L = S at 2x, no copy) */
-    uint8_t bpp;               /* 1: packed binary alpha; 4: row-aligned alpha nibbles */
+    uint8_t bpp;               /* 1: packed binary alpha; 2 or 4: row-aligned alpha */
     const uint8_t *adv;        /* advance per glyph */
     const uint8_t *bw;         /* bitmap width per glyph (starts FONT_PAD left of the pen) */
-    const uint16_t *off;       /* byte offset of each glyph */
+    const uint16_t *off;       /* byte offset of each glyph: first inked row, inked rows, the rows */
     const uint8_t *data;
 } felucca_font_t;
 #include "felucca_font.h"
@@ -37,16 +37,16 @@ static const palette_t PALETTES[] = {
     {"CYAN", {RGB(0, 30, 50), RGB(0, 62, 96), RGB(16, 112, 160), RGB(56, 172, 222), RGB(140, 222, 255)}},
     {"RED", {RGB(52, 8, 8), RGB(100, 18, 14), RGB(170, 36, 26), RGB(226, 64, 48), RGB(255, 112, 92)}},
     {"MONO", {RGB(40, 40, 40), RGB(80, 80, 80), RGB(130, 130, 130), RGB(186, 186, 186), RGB(226, 226, 226)}},
-    {"ORBIT", {RGB(38, 38, 44), RGB(86, 86, 98), RGB(140, 140, 152), RGB(196, 196, 208), RGB(230, 230, 240)}},
+    {"ORBIT", {RGB(30, 30, 44), RGB(70, 72, 100), RGB(119, 121, 150), RGB(174, 177, 220), RGB(223, 217, 255)}},   /* the OP-1's lavender grays */
     {"PASTEL", {RGB(38, 38, 46), RGB(90, 90, 108), RGB(150, 150, 170), RGB(202, 202, 220), RGB(236, 236, 248)}},
     {"NEON", {RGB(30, 32, 44), RGB(76, 86, 106), RGB(132, 148, 172), RGB(188, 210, 226), RGB(226, 246, 255)}},
 };
 #define NPALETTES (sizeof(PALETTES) / sizeof(PALETTES[0]))
-static uint16_t pal[5], TE_COL[4], TE_MID[4], TE_DIM[4], te_alert;
-/* ORBIT(기본): 오리지널 OP-1의 encoder 순서 blue / green / white / orange. 셋째 색은 노랑이 아니라 흰색이다.
+static uint16_t pal[5], TE_COL[4], TE_MID[4], TE_DIM[4], te_alert, te_g[4];
+/* ORBIT(기본): 오리지널 OP-1 화면의 encoder 색 blue / green / white / red (OP-1 화면에서 잰 값). 셋째 색은 흰색이다.
  * PASTEL과 NEON은 사용자가 고르는 팔레트로 자기 색을 유지한다 */
 static const uint16_t TRACK_STYLES[3][4] = {
-    {RGB(40,124,255), RGB(30,204,112), RGB(255,255,255), RGB(255,98,26)},
+    {RGB(105,142,255), RGB(0,237,149), RGB(255,255,255), RGB(255,58,93)},
     {RGB(142,182,255), RGB(140,224,176), RGB(255,222,140), RGB(255,166,150)},
     {RGB(52,210,255), RGB(114,255,100), RGB(244,255,60), RGB(255,86,194)},
 };
@@ -72,7 +72,13 @@ static void palette_set(uint32_t i)
         TE_MID[k] = color_scale(TE_COL[k], 170u);
         TE_DIM[k] = color_scale(TE_COL[k], 86u);
     }
-    te_alert = i == 4u ? C_WHITE : RGB(255,44,52);
+    te_alert = i == 4u ? C_WHITE : i == 5u ? TRACK_STYLES[0][3] : RGB(255,44,52);
+    {   /* the live screens' neutrals (tiles, tracks, labels, secondary text): lavender with ORBIT, gray else */
+        static const uint16_t G[2][4] = {{RGB(26, 26, 30), RGB(54, 54, 60), RGB(118, 118, 126), RGB(196, 196, 204)},
+                                         {RGB(22, 22, 34), RGB(50, 51, 74), RGB(119, 121, 150), RGB(174, 177, 220)}};
+        for (k = 0; k < 4u; k++)
+            te_g[k] = G[i == 5u][k];
+    }
 }
 
 static inline uint16_t swap16(uint32_t c) { return (uint16_t)(((c >> 8) & 0xFFu) | ((c & 0xFFu) << 8)); }
@@ -203,6 +209,12 @@ static void cv_line_q4(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w
     int startcap = !(x0 == cv_jx && y0 == cv_jy);
     cv_jx = x1;
     cv_jy = y1;
+    {   /* wholly outside this canvas (another band, cv_oy): nothing to compute */
+        int32_t m = hw + 24;
+        if (((y0 < y1 ? y1 : y0) + m) / 16 + cv_oy < 0 || ((y0 < y1 ? y0 : y1) - m) / 16 + cv_oy >= (int32_t)cv_h ||
+            ((x0 < x1 ? x1 : x0) + m) / 16 < 0 || ((x0 < x1 ? x0 : x1) - m) / 16 >= (int32_t)cv_w)
+            return;
+    }
     len = (int32_t)gfx_isqrt(len2);
     r = (hw + 8 + 15) >> 4;             /* pixels to test on each side of the line */
     ext = r + 1;
@@ -339,6 +351,13 @@ static void cv_curve_col(int32_t x, int32_t yp, int32_t y, int32_t yn)
     hi = (a < b ? b : a) + hwv;
     if (y < lo + hwv) lo = y - hwv;         /* a peak: the sample itself sticks out */
     if (y > hi - hwv) hi = y + hwv;
+    {   /* only the rows of this canvas (a band: cv_oy), whole pixels, so the coverage is the same */
+        int32_t top = -cv_oy * 16, bot = ((int32_t)cv_h - cv_oy) * 16 - 1;
+        if (lo < top) lo = top;
+        if (hi > bot) hi = bot;
+        if (lo > hi)
+            return;
+    }
     for (py = lo >> 4; py <= hi >> 4; py++) {
         int32_t t = py * 16, o = (hi < t + 16 ? hi : t + 16) - (lo > t ? lo : t);
         if (o > 0)
@@ -409,12 +428,19 @@ static uint32_t glyph(const felucca_font_t *f, uint32_t ch)
     return ch - f->first;
 }
 
-static inline uint32_t font_alpha(const uint8_t *data, uint32_t w, uint32_t x, uint32_t y, uint32_t bpp)
+/* alpha 0..15 of glyph g (its two-byte row header, then the rows) at x, y of the cell */
+static inline uint32_t font_alpha(const uint8_t *g, uint32_t w, uint32_t x, uint32_t y, uint32_t bpp)
 {
+    const uint8_t *data = g + 2;
+    y -= g[0];
+    if (y >= g[1])                  /* a blank row above or below the ink */
+        return 0;
     if (bpp == 1u) {
         uint32_t bit = y * w + x;
         return ((data[bit >> 3] >> (7u - (bit & 7u))) & 1u) * 15u;
     }
+    if (bpp == 2u)
+        return ((data[y * ((w + 3u) / 4u) + x / 4u] >> (6u - 2u * (x & 3u))) & 3u) * 5u;
     {
         uint32_t v = data[y * ((w + 1u) / 2u) + x / 2u];
         return x & 1u ? v & 15u : v >> 4;
@@ -432,7 +458,7 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
         const uint8_t *gd;
         w = f->bw[gi];
         gd = f->data + f->off[gi];
-        for (gy = 0; gy < f->h; gy++)
+        for (gy = (uint32_t)gd[0] << f->sh; gy < (uint32_t)(gd[0] + gd[1]) << f->sh; gy++)   /* inked rows only */
             for (gx = 0; gx < w; gx++) {
                 uint32_t v = font_alpha(gd, w >> f->sh, gx >> f->sh, gy >> f->sh, f->bpp);
 #if CV_AA

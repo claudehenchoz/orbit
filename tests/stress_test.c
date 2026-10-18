@@ -27,61 +27,46 @@ static void scheck(int ok, const char *what) { if (!ok) { printf("FAIL %s\n", wh
 static double st_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e9 + t.tv_nsec; }
 
 /* ---- font ---- */
-static uint8_t big_data[64 * 24 * 32 / 2 + 64];   /* the old FONT_L: S enlarged and stored (reference only) */
-static uint16_t big_off[64];
-static felucca_font_t FONT_L2X;
-
-static void font_ref_build(void)
-{
-    uint32_t gi, o = 0;
-    for (gi = 0; gi < 64u; gi++) {
-        uint32_t ws = FONT_S.bw[gi], wb = FONT_L.bw[gi], bs = (ws + 1u) / 2u, bb = (wb + 1u) / 2u, x, y;
-        const uint8_t *s = FONT_S.data + FONT_S.off[gi];
-        big_off[gi] = (uint16_t)o;
-        for (y = 0; y < 32u; y++)
-            for (x = 0; x < wb; x++) {
-                uint32_t sx = x / 2u, v;
-                if (FONT_S.bpp == 1u) {
-                    uint32_t bit = (y / 2u) * ws + sx;
-                    v = (s[bit / 8u] & (128u >> (bit % 8u))) ? 15u : 0u;
-                } else {
-                    v = s[(y / 2u) * bs + sx / 2u];
-                    v = (sx & 1u) ? (v & 15u) : (v >> 4);
-                }
-                if (x & 1u) big_data[o + y * bb + x / 2u] |= (uint8_t)v;
-                else big_data[o + y * bb + x / 2u] = (uint8_t)(v << 4);
-            }
-        o += 32u * bb;
-        assert(o <= sizeof big_data);
-    }
-    FONT_L2X = FONT_L;
-    FONT_L2X.sh = 0;
-    FONT_L2X.bpp = 4;
-    FONT_L2X.off = big_off;
-    FONT_L2X.data = big_data;
-}
-
 static void t_font(void)
 {
     static uint16_t a[CV_MAX];
-    uint32_t c, i, bad = 0, n = 0;
+    uint32_t c, i, bad = 0;
     char s[48];
-    font_ref_build();
-    scheck(FONT_L.data == FONT_S.data && FONT_L.sh == 1u && FONT_L.h == 2u * FONT_S.h && FONT_L.first == FONT_S.first,
-           "font: FONT_L draws FONT_S's bitmaps at 2x");
-    for (c = 32; c < 128u; c++) {                     /* every character, lower case folding to capitals */
+    const felucca_font_t *fs[2] = {&FONT_S, &FONT_L};
+    scheck(FONT_S.h == 16u && FONT_L.h == 32u, "font: S and L keep the 16 and 32 px line heights");
+    for (i = 0; i < 2u; i++)
+        for (c = fs[i]->first; c <= fs[i]->last; c++) {   /* every glyph's inked rows lie in its cell */
+            const uint8_t *g = fs[i]->data + fs[i]->off[c - fs[i]->first];
+            bad += ((uint32_t)g[0] + g[1]) << fs[i]->sh > fs[i]->h;
+        }
+    scheck(bad == 0, "font: inked rows inside the cell");
+    for (c = '0'; c <= '9'; c++) {                    /* tabular figures: numbers keep their layout */
         s[0] = (char)c; s[1] = 0;
-        cv_begin(40, 40, C_BLACK); cv_text(6, 3, &FONT_L2X, s, C_HI);
-        memcpy(a, cv_px, sizeof(uint16_t) * 40u * 40u);
-        cv_begin(40, 40, C_BLACK); cv_text(6, 3, &FONT_L, s, C_HI);
-        for (i = 0; i < 40u * 40u; i++) { n++; bad += a[i] != cv_px[i]; }
-        scheck(text_w(&FONT_L, s) == text_w(&FONT_L2X, s) && text_w(&FONT_L, s) == 2 * text_w(&FONT_S, c < 'a' || c > 'z' ? s : "A"),
-               "font: L advance = 2 x S");
+        scheck(text_w(&FONT_S, s) == 8 && text_w(&FONT_L, s) == 16, "font: digits advance 8 (S) and 16 (L)");
     }
-    printf("font: %u characters, %u pixels compared, %u different\n", 96u, n, bad);
-    scheck(bad == 0, "font: FONT_L from S at 2x = the stored 2x font, pixel for pixel");
+    {   /* 2-bit alpha 0..3 draws as the 4-bit alpha 0, 5, 10, 15 */
+        static const uint8_t d2[] = {0, 1, 0x1b}, d4[] = {0, 1, 0x05, 0xaf}, adv[] = {4}, bw[] = {4};
+        static const uint16_t off[] = {0};
+        const felucca_font_t f2 = {1, 0, 'A', 'A', 0, 2, adv, bw, off, d2}, f4 = {1, 0, 'A', 'A', 0, 4, adv, bw, off, d4};
+        cv_begin(4, 1, C_BLACK); cv_text(0, 0, &f4, "A", C_WHITE);
+        memcpy(a, cv_px, sizeof(uint16_t) * 4u);
+        cv_begin(4, 1, C_BLACK); cv_text(0, 0, &f2, "A", C_WHITE);
+        scheck(!memcmp(a, cv_px, sizeof(uint16_t) * 4u) && cv_px[0] == swap16(C_BLACK) && cv_px[3] == swap16(C_WHITE),
+               "font: 2-bit alpha = 4-bit 0, 5, 10, 15");
+    }
+    {   /* the row header: one inked row (row 1) of a 3-row cell, at 1x and at 2x (sh) */
+        static const uint8_t data[] = {1, 1, 0xc0}, adv[] = {2}, bw[] = {2}, bw2[] = {4};
+        static const uint16_t off[] = {0};
+        const felucca_font_t f = {3, 0, 'A', 'A', 0, 1, adv, bw, off, data}, f2 = {6, 0, 'A', 'A', 1, 1, adv, bw2, off, data};
+        cv_begin(2, 3, C_BLACK); cv_text(0, 0, &f, "A", C_WHITE);
+        for (i = 0; i < 6u; i++)
+            scheck(cv_px[i] == swap16(i / 2u == 1u ? C_WHITE : C_BLACK), "font: only the header's rows are drawn");
+        cv_begin(4, 6, C_BLACK); cv_text(0, 0, &f2, "A", C_WHITE);
+        for (i = 0; i < 24u; i++)
+            scheck(cv_px[i] == swap16(i / 8u == 1u ? C_WHITE : C_BLACK), "font: sh = 1 doubles the rows and the header");
+    }
     {
-        static const uint8_t data[] = {0xaa, 0x80}, adv[] = {3}, bw[] = {3};
+        static const uint8_t data[] = {0, 3, 0xaa, 0x80}, adv[] = {3}, bw[] = {3};
         static const uint16_t off[] = {0};
         const felucca_font_t f = {3, 0, 'A', 'A', 0, 1, adv, bw, off, data};
         cv_begin(3, 3, C_BLACK); cv_text(0, 0, &f, "A", C_WHITE);
@@ -90,7 +75,7 @@ static void t_font(void)
                    "font: packed odd-width rows cross byte boundaries without padding");
     }
     {
-        static const uint8_t data[] = {0x01, 0x7f}, adv[] = {4}, bw[] = {4};
+        static const uint8_t data[] = {0, 1, 0x01, 0x7f}, adv[] = {4}, bw[] = {4};
         static const uint16_t off[] = {0}, expected[] = {0, 0x1082, 0x73ae, 0xffff};
         const felucca_font_t f = {1, 0, 'A', 'A', 0, 4, adv, bw, off, data};
         cv_begin(4, 1, C_BLACK); cv_text(0, 0, &f, "A", C_WHITE);
@@ -376,16 +361,16 @@ static void t_bench(void)
     printf("bench: draw a frame: TRACKS screen %.1f us;", home / 1000);
     for (s = 0; s < VIS_N; s++) printf(" %s %.1f%s", VIS_NAME[s], v[s] / 1000, s + 1u < VIS_N ? "," : " us\n");
     vis_on = 0; go_home(); frames(4);
-    for (i = 0; i < 3000u; i++) {                     /* FONT_L from S (shifts) against the stored 2x copy */
+    for (i = 0; i < 3000u; i++) {                     /* anti-aliased text: a large value and a label */
         double t0 = st_ns();
         cv_begin(240, 32, C_BLACK); cv_text(2, 0, &FONT_L, TXT[i % 6u], C_HI);
         a += st_ns() - t0;
         t0 = st_ns();
-        cv_begin(240, 32, C_BLACK); cv_text(2, 0, &FONT_L2X, TXT[i % 6u], C_HI);
+        cv_begin(240, 32, C_BLACK); cv_text(2, 0, &FONT_S, TXT[i % 6u], C_HI);
         b += st_ns() - t0;
     }
-    printf("bench: a large value drawn: %.2f us from S at 2x, %.2f us from a stored 2x copy (%+.0f %%)\n",
-           a / 3000 / 1000, b / 3000 / 1000, (a / b - 1) * 100);
+    printf("bench: text drawn (host time): %.2f us a large value, %.2f us a label\n",
+           a / 3000 / 1000, b / 3000 / 1000);
     transport_req = 2; frames(4);
 }
 

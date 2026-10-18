@@ -361,15 +361,15 @@ static void vis_scope(void)
     cv_rect(0, 120, 240, 1, C_LINE);
     for (i = 0; i < 240u; i += 40u)
         cv_rect((int32_t)i, 116, 1, 9, C_LINE);
-    for (i = 0; i < 240u; i++) {
-        int32_t y = 120 - vis_l[i0 + i] * 100 / (vs.scale ? vs.scale : 1);
-        y = clamp(y, 2, 237);
-        if (i) {
-            cv_line((int32_t)i - 1, py - 1, (int32_t)i, y - 1, TE_DIM[0]);
-            cv_line((int32_t)i - 1, py + 2, (int32_t)i, y + 2, TE_DIM[0]);
-            vis_thick((int32_t)i - 1, py, (int32_t)i, y, TE_COL[0]);
-        }
-        py = y;
+    /* the trace, a glow under it: one anti-aliased column a sample (cv_curve: no line segments, no
+     * divisions a pixel), so a loud, steep wave costs as little as a quiet one; each band draws only
+     * its own rows */
+    for (py = 0; py < 2; py++) {
+        int32_t sc = vs.scale ? vs.scale : 1;
+        cv_curve_begin(py ? 30 : 76, py ? TE_COL[0] : TE_DIM[0]);
+        for (i = 0; i < 240u; i++)
+            cv_curve_pt((int32_t)i, clamp(120 * 16 + 8 - vis_l[i0 + i] * 1600 / sc, 2 * 16, 237 * 16));
+        cv_curve_end();
     }
 }
 static void vis_spectrum(void)
@@ -550,16 +550,15 @@ static void vis_wires(void)
 {
     uint32_t i, x;
     for (i = 0; i < 4u; i++) {
-        int32_t y0 = 40 + (int32_t)i * 52, amp = vs.wamp[i] * 22 / 1000, py = y0;
+        int32_t y0 = 40 + (int32_t)i * 52, amp = vs.wamp[i] * 22 * 16 / 1000;
         char lab[2] = {(char)('1' + i), 0};
-        for (x = 0; x < 240u; x += 2u) {           /* a standing wave: the string's shape x its swing */
+        cv_curve_begin(32, TE_COL[i]);              /* (a column a pixel, 1/16 px: cheap at any swing) */
+        for (x = 0; x < 240u; x++) {               /* a standing wave: the string's shape x its swing */
             uint32_t a = x * 512u / 240u, cyc = i == 3u ? 8u : vs.wn[i] ? vs.wn[i] : 2u;   /* sin(pi x / L) */
             int32_t env = isin(a), wv = isin(x * cyc * 1024u / 240u + vs.wph * (3u + i));
-            int32_t y = y0 - (((env * wv) >> 15) * amp >> 15);
-            if (x)
-                vis_thick((int32_t)x - 2, py, (int32_t)x, y, TE_COL[i]);
-            py = y;
+            cv_curve_pt((int32_t)x, y0 * 16 + 8 - (((env * wv) >> 15) * amp >> 15));
         }
+        cv_curve_end();
         vis_ellipse(4, y0, 4, 4, C_WHITE);
         vis_ellipse(236, y0, 4, 4, C_WHITE);
         cv_text(10, y0 - 22, &FONT_S, lab, TE_COL[i]);
